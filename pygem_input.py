@@ -15,7 +15,7 @@ from pygem.utils._funcs_selectglaciers import get_same_glaciers, glac_num_fromra
 
 #%% ===== MODEL SETUP DIRECTORY =====
 main_directory = os.getcwd()
-# main_directory = '/Users/btober/Documents/pygem_data/Output/'      # file path hack if data is in different location from code
+main_directory = '/Users/btober/Documents/pygem_data/Output/'      # file path hack if data is in different location from code
 # Output directory
 output_filepath = main_directory + '/../Output/'
 model_run_date = datetime.today().strftime('%Y-%m-%d')
@@ -82,7 +82,7 @@ if hindcast:
 
 #%% ===== CALIBRATION OPTIONS =====
 # Calibration option ('emulator', 'MCMC', 'MCMC_fullsim' 'HH2015', 'HH2015mod', None)
-option_calibration = 'MCMC'
+option_calibration = 'emulator'
 
 # Prior distribution (specify filename or set equal to None)
 priors_reg_fullfn = main_directory + '/../Output/calibration/priors_region.csv'
@@ -114,7 +114,8 @@ elif option_calibration == 'HH2015mod':
     
 elif option_calibration == 'emulator':
     emulator_sims = 100             # Number of simulations to develop the emulator
-    overwrite_em_sims = False       # Overwrite emulator simulations
+    overwrite_em_sims = True       # Overwrite emulator simulations
+    opt_calib_monthly_thick = True # Option to calibrate monthly binned glacier thickness
     opt_hh2015_mod = True           # Option to also perform the HH2015_mod calibration using the emulator
     emulator_fp = output_filepath + 'emulator/'
     tbias_step = 0.5                # tbias step size
@@ -213,7 +214,7 @@ icethickness_cal_frac_byarea = 0.9  # Regional glacier area fraction that is use
 
 #%% ===== SIMULATION AND GLACIER DYNAMICS OPTIONS =====
 # Glacier dynamics scheme (options: 'OGGM', 'MassRedistributionCurves', None)
-option_dynamics = 'OGGM'
+option_dynamics = None
     
 # Bias adjustment option (options: 0, 1, 2, 3) 
 #  0: no adjustment
@@ -242,7 +243,7 @@ export_binned_area_threshold = 0    # Area threshold for exporting binned ice th
 export_extra_vars = True            # Option to export extra variables (temp, prec, melt, acc, etc.)
 
 # OGGM glacier dynamics parameters
-if option_dynamics in ['OGGM', 'MassRedistributionCurves']:
+if option_dynamics in ['OGGM', 'MassRedistributionCurves'] or (option_calibration == 'emulator' and opt_calib_monthly_thick):
     cfl_number = 0.02
     cfl_number_calving = 0.01
     glena_reg_fullfn = main_directory + '/../Output/calibration/glena_region.csv'
