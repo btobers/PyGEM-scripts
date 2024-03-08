@@ -241,6 +241,7 @@ def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None):
     print(mbmod.glac_bin_icethickness_annual.shape)
     # Update the latest thickness and volume if ev_model is not None???
 
+    # mbmod.glac_bin_massbalclim and mbmod.glac_bin_icethickness_annual do not have the same number of bins as fls[0].surface_h!!!
     return fls[0].surface_h, mbmod.glac_bin_massbalclim, mbmod.glac_bin_icethickness_annual
 
 
@@ -825,7 +826,9 @@ def main(list_packed_vars):
                         # output array will be time, elevation (of bin), model parameters, mass balance at that bin
                         # Option get monthly bin thickness
                         if pygem_prms.opt_calib_monthly_thick:
-                            mb_binned_out = binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=fls)
+                            surf_h_init, bin_massbalclim_monthly, bin_thickness_annual = binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=fls)
+                            print(surf_h_init.shape, bin_massbalclim_monthly.shape, bin_thickness_annual.shape)
+                            sys.exit(1)
                             # calculate binned monthly ice thickness - ravel so that output dimension is len(r*c), where r is the number of time steps and c is the number of elevaiton bins
                             bin_mbtot_monthly = get_bin_mbtot_monthly(mb_binned_out['bin_massbalclim_monthly'], mb_binned_out['bin_thick_annual'])
                             nbins,nsteps = bin_mbtot_monthly.shape
