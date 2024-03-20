@@ -161,7 +161,7 @@ def mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=None, t1=None, t2=None)
     return nbinyears_negmbclim, mb_mwea
 
 
-def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None):
+def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=None, fs=None):
     """
     Run the ice thickness inversion and mass balance model to get binned annual ice thickness evolution
 
@@ -173,23 +173,11 @@ def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None):
     out: dict
         dictionary object containing binned initial surface height, monthly climatic mass balance, and annual thickness
     """
-    # get glen_a multiplier for ice thickness mass conservation inversion
-    if pygem_prms.use_reg_glena:
-        glena_df = pd.read_csv(pygem_prms.glena_reg_fullfn)                    
-        glena_O1regions = [int(x) for x in glena_df.O1Region.values]
-        assert glacier_rgi_table.O1Region in glena_O1regions, ' O1 region not in glena_df'
-        glena_idx = np.where(glena_O1regions == glacier_rgi_table.O1Region)[0][0]
-        glen_a_multiplier = glena_df.loc[glena_idx,'glens_a_multiplier']
-        fs = glena_df.loc[glena_idx,'fs']
-    else:
-        fs = pygem_prms.fs
-        glen_a_multiplier = pygem_prms.glen_a_multiplier
-
     nyears = int(gdir.dates_table.shape[0]/12) # number of years from dates table
 
     # perform OGGM ice thickness inversion
     if not gdir.is_tidewater or not pygem_prms.include_calving:
-        # Perform inversion based on PyGEM MB using reference directory - I'm not sure if this is needed
+        # Perform inversion based on PyGEM MB using reference directory
         mbmod_inv = PyGEMMassBalance(gdir, modelprms, glacier_rgi_table,
                                         hindcast=pygem_prms.hindcast,
                                         debug=pygem_prms.debug_mb,
@@ -197,7 +185,7 @@ def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None):
                                         fls=fls, option_areaconstant=True,
                                         inversion_filter=pygem_prms.include_debris)
         # Arbitrariliy shift the MB profile up (or down) until mass balance is zero (equilibrium for inversion)
-        apparent_mb_from_any_mb(gdir, mb_years=np.arange(nyears)) # mb_model=mbmod_inv???
+        apparent_mb_from_any_mb(gdir, mb_years=np.arange(nyears), mb_model=mbmod_inv)
         tasks.prepare_for_inversion(gdir)
         tasks.mass_conservation_inversion(gdir, glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs)
         tasks.init_present_time_glacier(gdir) # adds bins below
@@ -212,6 +200,7 @@ def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None):
                 nfls = gdir.read_pickle('model_flowlines')
             else:
                 raise
+
         # Water Level
         # Check that water level is within given bounds
         cls = gdir.read_pickle('inversion_input')[-1]
@@ -238,11 +227,8 @@ def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None):
         else:
             _, diag = ev_model.run_until_and_store(nyears)
 
-    print(mbmod.glac_bin_icethickness_annual.shape)
-    # Update the latest thickness and volume if ev_model is not None???
 
-    # mbmod.glac_bin_massbalclim and mbmod.glac_bin_icethickness_annual do not have the same number of bins as fls[0].surface_h!!!
-    return fls[0].surface_h, mbmod.glac_bin_massbalclim, mbmod.glac_bin_icethickness_annual
+    return nfls[0].surface_h, mbmod.glac_bin_massbalclim, mbmod.glac_bin_icethickness_annual
 
 
 def get_bin_mbtot_monthly(bin_massbalclim_monthly, bin_thick_annual):
@@ -268,7 +254,6 @@ def get_bin_mbtot_monthly(bin_massbalclim_monthly, bin_thick_annual):
         ndarray containing the binned monthly total mass balance
         shape : [#elevbins, #months]
     """
-    print(bin_massbalclim_monthly.shape, bin_thick_annual.shape)
     # get annual cumulative climatic mass balance - requires reshaping monthly binned values and summing every 12 months
     bin_massbalclim_annual = bin_massbalclim_monthly.reshape(bin_massbalclim_monthly.shape[0],bin_massbalclim_monthly.shape[1]//12,-1).sum(2)
 
@@ -301,7 +286,7 @@ def get_bin_mbtot_monthly(bin_massbalclim_monthly, bin_thick_annual):
     # # get binned monthly thickness = running thickness change + initial thickness
     # running_delta_thick_monthly = np.cumsum(delta_thick_monthly, axis=-1)
     # bin_thick_monthly =  running_delta_thick_monthly + bin_thick_annual[:,0][:,np.newaxis] 
-    print(bin_massbalclim_monthly.shape)
+
     return bin_mbtot_monthly
 
 
@@ -311,7 +296,7 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
         def __init__(self, train_x, train_y, likelihood):
             super(ExactGPModel, self).__init__(train_x, train_y, likelihood)
             self.mean_module = gpytorch.means.ConstantMean()
-            self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=3))
+            self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
     
         def forward(self, x):
             mean_x = self.mean_module(x)
@@ -320,7 +305,7 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
 
 
     def create_emulator(glacier_str, sims_dict, y_cn, 
-                        X_cns=['tbias','kp','ddfsnow','nbinyrs_negmbclim','time','bin_mbtot_monthly'], 
+                        X_cns=['tbias','kp','ddfsnow','nbinyrs_negmbclim','time','bin_h_init'], 
                         em_fp=pygem_prms.output_filepath + 'emulator/', debug=False):
         """
         create emulator for calibrating PyGEM model parameters
@@ -360,19 +345,20 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
         X = np.column_stack((Xs))
         y = np.array(sims_dict[y_cn])
 
-        # remove and nan's
+        # remove any nan's
         nanmask  = ~np.isnan(y)
         X = X[nanmask,:]
         y = y[nanmask]
 
         if debug:
+            print(f'Calibration x-parameters: {", ".join(X_cns)}')
+            print(f'Calibration y-parametes: {y_cn}')
             print(f'X:\n{X}')
+            print(f'X-shape:\n{X.shape}\n')
             print(f'y:\n{y}')
-        ##################
+            print(f'y-shape:\n{y.shape}')
 
-        # X = sims_df.loc[:,X_cns].values
-        # y = sims_df[y_cn].values
-    
+        ##################
         # Normalize data
         X_mean = X.mean(axis=0)
         X_std = X.std(axis=0)
@@ -812,11 +798,24 @@ def main(list_packed_vars):
                     
                     # Set up new simulation dictionary if running an emulator for monthly surface elevation change  # FIRST RUN SHOULD BE ON BOUNDS
                     if pygem_prms.opt_calib_monthly_thick:
-                        sims_dict = {}      
+                        sims_dict = {} 
+
+                        # get glen_a multiplier for ice thickness mass conservation inversion
+                        if pygem_prms.use_reg_glena:
+                            glena_df = pd.read_csv(pygem_prms.glena_reg_fullfn)                    
+                            glena_O1regions = [int(x) for x in glena_df.O1Region.values]
+                            assert glacier_rgi_table.O1Region in glena_O1regions, ' O1 region not in glena_df'
+                            glena_idx = np.where(glena_O1regions == glacier_rgi_table.O1Region)[0][0]
+                            glen_a_multiplier = glena_df.loc[glena_idx,'glens_a_multiplier']
+                            fs = glena_df.loc[glena_idx,'fs']
+                        else:
+                            fs = pygem_prms.fs
+                            glen_a_multiplier = pygem_prms.glen_a_multiplier     
                         # TO-DO: run through predetermined tbias and ddfsnow low and high bounds and add output to sims_dict results
 
                     # Run through random values
                     for nsim in range(pygem_prms.emulator_sims):
+                        print(nsim)
                         modelprms['tbias'] = tbias_random[nsim]
                         modelprms['kp'] = kp_random[nsim]
                         modelprms['ddfsnow'] = ddfsnow_random[nsim]
@@ -826,14 +825,10 @@ def main(list_packed_vars):
                         # output array will be time, elevation (of bin), model parameters, mass balance at that bin
                         # Option get monthly bin thickness
                         if pygem_prms.opt_calib_monthly_thick:
-                            surf_h_init, bin_massbalclim_monthly, bin_thickness_annual = binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=fls)
-                            print(surf_h_init.shape, bin_massbalclim_monthly.shape, bin_thickness_annual.shape)
-                            sys.exit(1)
+                            surf_h_init, bin_massbalclim_monthly, bin_thickness_annual = binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=fls, glen_a_multiplier=glen_a_multiplier, fs=fs)
                             # calculate binned monthly ice thickness - ravel so that output dimension is len(r*c), where r is the number of time steps and c is the number of elevaiton bins
-                            bin_mbtot_monthly = get_bin_mbtot_monthly(mb_binned_out['bin_massbalclim_monthly'], mb_binned_out['bin_thick_annual'])
+                            bin_mbtot_monthly = get_bin_mbtot_monthly(bin_massbalclim_monthly, bin_thickness_annual)
                             nbins,nsteps = bin_mbtot_monthly.shape
-                            print(nbins,nsteps)
-                            # print(mb_binned_out['surface_h_init'],mb_binned_out['surface_h_init'].shape)
 
                             bin_mbtot_monthly = np.ravel(bin_mbtot_monthly)
                             # update sims_dict - we'll need to repeat parameters nxm times (where n is the number of elevation bins, m is the number of time steps)                        
@@ -845,24 +840,24 @@ def main(list_packed_vars):
                                                             np.repeat(modelprms['kp'], len(bin_mbtot_monthly)).tolist(), 
                                                             np.repeat(modelprms['ddfsnow'], len(bin_mbtot_monthly)).tolist(), 
                                                             np.tile(np.arange(nsteps), nbins).tolist(),
-                                                            np.repeat(mb_binned_out['surface_h_init'], nsteps).tolist(),
+                                                            np.repeat(surf_h_init, nsteps).tolist(),
                                                             bin_mbtot_monthly.tolist()
                                                             ]
                                                     )
-                        #     # print(sims_dict)
-                        #     if nsim==0 and debug:
-                        #         print(pd.DataFrame(sims_dict).head())
-                        #         print(pd.DataFrame(sims_dict).tail())
+                            # print(sims_dict)
+                            if nsim==0 and debug:
+                                print(pd.DataFrame(sims_dict).head())
+                                print(pd.DataFrame(sims_dict).tail())
 
-                        # else:
-                        # number of bins that have negative clim. mass balance for a given year, mass balance for 2000-2019 period, optionally return binned monthly climatic mass balance
-                        nbinyears_negmbclim, mb_mwea = mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=fls)
-                        # append results to emulator output dict
-                        sims_dict = dict_append(
-                                                dictionary = sims_dict,
-                                                keys=['tbias','kp','ddfsnow','mb_mwea','nbinyears_negmbclim'],
-                                                vals = [modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow'], mb_mwea, nbinyears_negmbclim]
-                                                )
+                        else:
+                            # number of bins that have negative clim. mass balance for a given year, mass balance for 2000-2019 period, optionally return binned monthly climatic mass balance
+                            nbinyears_negmbclim, mb_mwea = mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=fls)
+                            # append results to emulator output dict
+                            sims_dict = dict_append(
+                                                    dictionary = sims_dict,
+                                                    keys=['tbias','kp','ddfsnow','mb_mwea','nbinyears_negmbclim'],
+                                                    vals = [modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow'], mb_mwea, nbinyears_negmbclim]
+                                                    )
 
                         if debug and nsim%500 == 0:
                             print(nsim, 'tbias:', np.round(modelprms['tbias'],2), 'kp:', np.round(modelprms['kp'],2),
@@ -886,7 +881,7 @@ def main(list_packed_vars):
                 em_mod_fp = pygem_prms.emulator_fp + 'models/' + glacier_str.split('.')[0].zfill(2) + '/'
                 if not os.path.exists(em_mod_fp + em_mod_fn) or pygem_prms.overwrite_em_sims:
                     (X_train, X_mean, X_std, y_train, y_mean, y_std, likelihood, model) = (
-                            create_emulator(glacier_str, sims_dict, y_cn='mb_mwea', debug=debug))
+                            create_emulator(glacier_str, sims_dict, y_cn='bin_mbtot_monthly', debug=debug))
                 else:
                     # ----- LOAD EMULATOR -----
                     # This is required for the supercomputer such that resources aren't stolen from other cpus

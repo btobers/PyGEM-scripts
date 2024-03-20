@@ -32,9 +32,10 @@ rgi_glac_number = 'all'
 
 glac_no_skip = None
 glac_no = None 
-glac_no = ['15.03733'] # Khumbu Glacier
-# glac_no = ['1.10689'] # Columbia Glacier
+# glac_no = ['15.03733'] # Khumbu Glacier
+glac_no = ['1.10689'] # Columbia Glacier
 # glac_no = ['1.03622'] # LeConte Glacier
+glac_no = ['1.15769']
 
 
 if glac_no is not None:
@@ -113,7 +114,7 @@ elif option_calibration == 'HH2015mod':
     eps_opt = 0.01                  # epsilon (adjust variables for jacobian) for SciPy optimization scheme (1e-6 works)
     
 elif option_calibration == 'emulator':
-    emulator_sims = 100             # Number of simulations to develop the emulator
+    emulator_sims = 5             # Number of simulations to develop the emulator
     overwrite_em_sims = True       # Overwrite emulator simulations
     opt_calib_monthly_thick = True # Option to calibrate monthly binned glacier thickness
     opt_hh2015_mod = True           # Option to also perform the HH2015_mod calibration using the emulator
@@ -382,7 +383,6 @@ rgi_cols_drop = ['GLIMSId','BgnDate','EndDate','Status','Linkages','Name']
 # ----- ADDITIONAL DATA (hypsometry, ice thickness, width, debris) -----
 h_consensus_fp = main_directory + '/../IceThickness_Farinotti/composite_thickness_RGI60-all_regions/'
 # Filepath for the hypsometry files
-binsize = 10            # Elevation bin height [m]
 hyps_data = 'OGGM'      # Hypsometry dataset (OGGM; Maussion etal 2019)
                         # Other options to program are 'Huss' (GlacierMIP; Hock etal 2019) and Farinotti (Farinotti etal 2019) 
 
@@ -398,6 +398,9 @@ if include_debris:
     assert os.path.exists(debris_fp), 'Debris filepath does not exist. Turn off include_debris or add filepath.'
 else:
     debris_fp = None
+
+# OIB surface elevation time data
+oib_fp = main_directory + '../OIB/lidar_cop30_deltas/'
 
 
 #%% ===== MODEL TIME PERIOD DETAILS =====
