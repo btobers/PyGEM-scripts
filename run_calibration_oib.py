@@ -241,12 +241,12 @@ def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multipli
         return nfls[0].surface_h, mbmod.glac_bin_massbalclim, mbmod.glac_bin_icethickness_annual
 
 
-def get_bin_mbtot_monthly(bin_massbalclim_monthly, bin_thick_annual):
+def get_bin_thick_monthly(bin_massbalclim_monthly, bin_thick_annual):
     """
-    funciton to calculate the monthly binned total mass balance
+    funciton to calculate the monthly binned ice thickness
     from annual climatic mass balance and annual ice thickness
 
-    monthly total mass balance is determined assuming 
+    monthly binned ice thickness is determined assuming 
     the flux divergence is constant throughout the year.
 
     Inputs
@@ -260,8 +260,8 @@ def get_bin_mbtot_monthly(bin_massbalclim_monthly, bin_thick_annual):
 
     Outputs
     -------
-    bin_mbtot_monthly: float
-        ndarray containing the binned monthly total mass balance
+    bin_thick_monthly: float
+        ndarray containing the binned monthly ice thickness
         shape : [#elevbins, #months]
     """
     # get annual cumulative climatic mass balance - requires reshaping monthly binned values and summing every 12 months
@@ -283,21 +283,21 @@ def get_bin_mbtot_monthly(bin_massbalclim_monthly, bin_thick_annual):
     flux_div_monthly = np.tile(flux_div_annual / 12, 12)
 
     # get binned total mass balance (binned climatic mass balance + binned monthly flux divergence)
-    bin_mbtot_monthly = bin_massbalclim_monthly + flux_div_monthly
+    # bin_mbtot_monthly = bin_massbalclim_monthly + flux_div_monthly
 
-    # # get monthly binned change in thickness assuming constant flux divergence throughout the year
-    # # account for density contrast (convert monthly climatic mass balance in m w.e. to m ice)
-    # delta_thick_monthly =   (
-    #             (bin_massbalclim_monthly * 
-    #             (pygem_prms.density_ice / pygem_prms.density_water)) - 
-    #             flux_div_monthly
-    #                         )
+    # get monthly binned change in thickness assuming constant flux divergence throughout the year
+    # account for density contrast (convert monthly climatic mass balance in m w.e. to m ice)
+    delta_thick_monthly =   (
+                (bin_massbalclim_monthly * 
+                (pygem_prms.density_ice / pygem_prms.density_water)) - 
+                flux_div_monthly
+                            )
     
-    # # get binned monthly thickness = running thickness change + initial thickness
-    # running_delta_thick_monthly = np.cumsum(delta_thick_monthly, axis=-1)
-    # bin_thick_monthly =  running_delta_thick_monthly + bin_thick_annual[:,0][:,np.newaxis] 
+    # get binned monthly thickness = running thickness change + initial thickness
+    running_delta_thick_monthly = np.cumsum(delta_thick_monthly, axis=-1)
+    bin_thick_monthly =  running_delta_thick_monthly + bin_thick_annual[:,0][:,np.newaxis] 
 
-    return bin_mbtot_monthly
+    return bin_thick_monthly
 
 
 if pygem_prms.option_calibration in ['MCMC', 'emulator']:
@@ -922,24 +922,24 @@ def main(list_packed_vars):
                         if pygem_prms.opt_calib_monthly_thick:
                             surf_h_init, bin_massbalclim_monthly, bin_thickness_annual = binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=fls, glen_a_multiplier=glen_a_multiplier, fs=fs)
                             # calculate binned monthly ice thickness - ravel so that output dimension is len(r*c), where r is the number of time steps and c is the number of elevaiton bins
-                            bin_mbtot_monthly = get_bin_mbtot_monthly(bin_massbalclim_monthly, bin_thickness_annual)
+                            bin_thick_monthly = get_bin_thick_monthly(bin_massbalclim_monthly, bin_thickness_annual)
                             # only retain bin_mbtot_monthly where we have oib data for reducing computational cost of emulator
                             oib_dates_idx = np.intersect1d(gdir.dates_table.date.to_numpy(), oib_dates.to_numpy(),return_indices=True)[1]
-                            bin_mbtot_monthly = bin_mbtot_monthly[:,oib_dates_idx]
-                            nbins,nsteps = bin_mbtot_monthly.shape
+                            bin_thick_monthly = bin_thick_monthly[:,oib_dates_idx]
+                            nbins,nsteps = bin_thick_monthly.shape
 
-                            bin_mbtot_monthly = np.ravel(bin_mbtot_monthly)
+                            bin_thick_monthly = np.ravel(bin_thick_monthly)
                             # update sims_dict - we'll need to repeat parameters nxm times (where n is the number of elevation bins, m is the number of time steps)                        
                             sims_dict = dict_append(
                                                     dictionary = sims_dict,
-                                                    keys=   ['tbias','kp','ddfsnow','time','bin_h_init','bin_mbtot_monthly'],
+                                                    keys=   ['tbias','kp','ddfsnow','time','bin_h_init','bin_thick_monthly'],
                                                     vals =  [
-                                                            np.repeat(modelprms['tbias'], len(bin_mbtot_monthly)).tolist(), 
-                                                            np.repeat(modelprms['kp'], len(bin_mbtot_monthly)).tolist(), 
-                                                            np.repeat(modelprms['ddfsnow'], len(bin_mbtot_monthly)).tolist(), 
+                                                            np.repeat(modelprms['tbias'], len(bin_thick_monthly)).tolist(), 
+                                                            np.repeat(modelprms['kp'], len(bin_thick_monthly)).tolist(), 
+                                                            np.repeat(modelprms['ddfsnow'], len(bin_thick_monthly)).tolist(), 
                                                             np.repeat(oib_dates_idx, nbins).tolist(),
                                                             np.repeat(surf_h_init, nsteps).tolist(),
-                                                            bin_mbtot_monthly.tolist()
+                                                            bin_thick_monthly.tolist()
                                                             ]
                                                     )
                             # print(sims_dict)
@@ -979,7 +979,7 @@ def main(list_packed_vars):
                 em_mod_fp = pygem_prms.emulator_fp + 'models/' + glacier_str.split('.')[0].zfill(2) + '/'
                 if not os.path.exists(em_mod_fp + em_mod_fn) or pygem_prms.overwrite_em_sims:
                     (X_train, X_mean, X_std, y_train, y_mean, y_std, likelihood, model) = (
-                            create_emulator(glacier_str, sims_dict, y_cn='bin_mbtot_monthly', debug=debug))
+                            create_emulator(glacier_str, sims_dict, y_cn='bin_thick_monthly', debug=debug))
                 else:
                     # ----- LOAD EMULATOR -----
                     # This is required for the supercomputer such that resources aren't stolen from other cpus

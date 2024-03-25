@@ -36,6 +36,7 @@ glac_no = None
 glac_no = ['1.10689'] # Columbia Glacier
 # glac_no = ['1.03622'] # LeConte Glacier
 glac_no = ['1.15769']
+# glac_no = ['1.22193']
 
 
 if glac_no is not None:
@@ -114,7 +115,7 @@ elif option_calibration == 'HH2015mod':
     eps_opt = 0.01                  # epsilon (adjust variables for jacobian) for SciPy optimization scheme (1e-6 works)
     
 elif option_calibration == 'emulator':
-    emulator_sims = 5             # Number of simulations to develop the emulator
+    emulator_sims = 1             # Number of simulations to develop the emulator
     overwrite_em_sims = True       # Overwrite emulator simulations
     opt_calib_monthly_thick = True # Option to calibrate monthly binned glacier thickness
     opt_hh2015_mod = True           # Option to also perform the HH2015_mod calibration using the emulator
