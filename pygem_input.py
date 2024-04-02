@@ -13,12 +13,15 @@ except:
 from pygem.utils._funcs_selectglaciers import get_same_glaciers, glac_num_fromrange, glac_fromcsv, glac_wo_cal
 
 
-#%% ===== MODEL SETUP DIRECTORY =====
+#%% ===== MODEL SETUP  =====
+user_info = {'name':'Brandon Tober',
+            'institution':'Carnegie Mellon University, Pittsburgh PA',
+            'email':'btober@cmu.edu'}
+model_run_date = datetime.today().strftime('%Y-%m-%d')
 main_directory = os.getcwd()
 main_directory = '/Users/btober/Documents/pygem_data/Output/'      # file path hack if data is in different location from code
 # Output directory
 output_filepath = main_directory + '/../Output/'
-model_run_date = datetime.today().strftime('%Y-%m-%d')
 
 #%% ===== GLACIER SELECTION =====
 rgi_regionsO1 = [13]                 # 1st order region number (RGI V6.0)
@@ -234,8 +237,8 @@ else:
 
 # Output filepath of simulations
 output_sim_fp = output_filepath + 'simulations/'
-# Output statistics of simulation (options include any of the following 'mean', 'std', '2.5%', '25%', 'median', '75%', '97.5%')
-sim_stat_cns = ['median', 'mad']
+# Output statistics of simulations (options include any of the following 'mean', 'std', '2.5%', '25%', 'median', '75%', '97.5%')
+sim_stats = ['median', 'mad']
 
 #%% ===== OUTPUT OPTIONS =====
 export_all_simiters = False         # Exprort individual simulation results (False exports median and MAD from all sim_iters)
@@ -389,7 +392,7 @@ hyps_data = 'OGGM'      # Hypsometry dataset (OGGM; Maussion etal 2019)
 
 # Hypsometry data pre-processed by OGGM
 if hyps_data == 'OGGM':
-    oggm_gdir_fp = main_directory + '/../oggm_gdirs/'
+    oggm_gdir_fp = main_directory + '/../OGGM/gdirs/'
     overwrite_gdirs = False
     has_internet = True
 
