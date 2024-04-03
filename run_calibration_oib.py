@@ -337,6 +337,7 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
         -------
         X_train, X_mean, X_std, y_train, y_mean, y_std, likelihood, model
         """
+        em_t0 = time.time()
         # This is required for the supercomputer such that resources aren't stolen from other cpus
         torch.set_num_threads(1)
         
@@ -404,6 +405,9 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
                 f, ax = plt.subplots(1, 1, figsize=(4, 4))
                 ax.plot(y_test.numpy()[idx], y_pred.mean.numpy()[idx], 'k*')
                 ax.fill_between(y_test.numpy()[idx], lower.numpy()[idx], upper.numpy()[idx], alpha=0.5)
+                ax.set_xlabel('y_test')
+                ax.set_ylabel('y_pred')
+                ax.set_ylim([-3,3])
                 plt.show()
     
         # ----- Find optimal model hyperparameters -----
@@ -437,6 +441,8 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
             y_pred = likelihood(model(X_test))
     
         idx = np.argsort(y_test.numpy())
+
+        print('emulator runtime:', time.time()-em_t0, 's')
     
         with torch.no_grad():
             lower, upper = y_pred.confidence_region()
@@ -446,6 +452,9 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
                 ax.plot(y_test.numpy()[idx], y_pred.mean.numpy()[idx], 'k*')
                 ax.fill_between(y_test.numpy()[idx], lower.numpy()[idx], upper.numpy()[idx], 
                                 alpha=0.5)
+                ax.set_xlabel('y_test')
+                ax.set_ylabel('y_pred')
+                ax.set_ylim([-3,3])
                 plt.show()
     
         if debug:
@@ -888,8 +897,10 @@ def main(list_packed_vars):
                     if debug:    
                         print('ddfsnow random:', ddfsnow_random.mean(), ddfsnow_random.std(),'\n')
                     
+                    y_cn = 'mb_mwea'    # predefine emulator y-variable name
                     # Set up new simulation dictionary if running an emulator for monthly surface elevation change  # FIRST RUN SHOULD BE ON BOUNDS
                     if pygem_prms.opt_calib_monthly_thick:
+                        y_cn = 'bin_thick_monthly'
                         sims_dict = {} 
 
                         # get oib survey dates for glacier - we'll only emulate glacier thickness/mass balance at these time steps
@@ -979,7 +990,7 @@ def main(list_packed_vars):
                 em_mod_fp = pygem_prms.emulator_fp + 'models/' + glacier_str.split('.')[0].zfill(2) + '/'
                 if not os.path.exists(em_mod_fp + em_mod_fn) or pygem_prms.overwrite_em_sims:
                     (X_train, X_mean, X_std, y_train, y_mean, y_std, likelihood, model) = (
-                            create_emulator(glacier_str, sims_dict, y_cn='bin_thick_monthly', debug=debug))
+                            create_emulator(glacier_str, sims_dict, y_cn=y_cn, debug=debug))
                 else:
                     # ----- LOAD EMULATOR -----
                     # This is required for the supercomputer such that resources aren't stolen from other cpus
