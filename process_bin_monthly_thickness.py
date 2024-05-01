@@ -150,7 +150,7 @@ def get_binned_monthly(bin_massbalclim_monthly, bin_massbalclim_annual, bin_mass
     ### to get monthly thickness and mass we need monthly flux divergence ###
     # we'll assume the flux divergence is constant througohut the year (is this a good assumption?)
     # ie. take annual values and divide by 12 - use numpy tile to repeat monthly values by 12 months
-    flux_div_monthly = np.tile(flux_div_annual / 12, 12)
+    flux_div_monthly = np.tile(flux_div_annual / 12, 12)            #### this may need to be repeat instead of tile!!!
 
     # get monthly binned change in thickness assuming constant flux divergence throughout the year
     # account for density contrast (convert monthly climatic mass balance in m w.e. to m ice)

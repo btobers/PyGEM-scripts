@@ -13,28 +13,30 @@ psuedocode:
 import argparse
 #import collections
 import inspect
+import warnings
+import importlib
 import multiprocessing
 import os
 import glob
 import sys
 import time
+import cftime
 import json
 import datetime
+from functools import partial
 # External libraries
 import pandas as pd
 import pickle
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.optimize import minimize
-from scipy import stats
+from scipy.optimize import minimize, fmin_bfgs
+from scipy import stats, signal
+from scipy.interpolate import interp1d
+import cmocean
 #import xarray as xr
 
 # Local libraries
-try:
-    import pygem
-except:
-    print('---------\nPyGEM DEV\n---------')
-    sys.path.append(os.getcwd() + '/../PyGEM/')
+import pygem
 import pygem_input as pygem_prms
 from pygem import class_climate
 from pygem.massbalance import PyGEMMassBalance
@@ -46,7 +48,7 @@ from pygem.shop import debris, mbdata, icethickness
 import oggm
 oggm_version = float(oggm.__version__[0:3])
 from oggm import cfg
-#from oggm import graphics
+from oggm import graphics
 from oggm import tasks
 from oggm import utils
 from oggm import workflow
@@ -101,9 +103,9 @@ def getparser():
     # add arguments
     parser.add_argument('-ref_gcm_name', action='store', type=str, default=pygem_prms.ref_gcm_name,
                         help='reference gcm name')
-    parser.add_argument('-num_simultaneous_processes', action='store', type=int, default=4,
+    parser.add_argument('-num_simultaneous_processes', action='store', type=int, default=1,
                         help='number of simultaneous processes (cores) to use')
-    parser.add_argument('-option_parallels', action='store', type=int, default=1,
+    parser.add_argument('-option_parallels', action='store_true',
                         help='Switch to use or not use parallels (1 - use parallels, 0 - do not)')
     parser.add_argument('-rgi_glac_number_fn', action='store', type=str, default=None,
                         help='Filename containing list of rgi_glac_number, helpful for running batches on spc')
@@ -117,6 +119,12 @@ def getparser():
                         help='rgi glacier number for supercomputer')
     parser.add_argument('-option_calibration', action='store', type=str, default=pygem_prms.option_calibration,
                         help='calibration option')
+    parser.add_argument('-kp', action='store', type=float, default=None,
+                        help='Precipitation bias')
+    parser.add_argument('-tbias', action='store', type=float, default=None,
+                        help='Temperature bias')
+    parser.add_argument('-ddfsnow', action='store', type=float, default=None,
+                        help='Degree-day factor of snow')
     return parser
 
 
@@ -172,20 +180,13 @@ def mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=None, t1=None, t2=None)
     return nbinyears_negmbclim, mb_mwea
 
 
-def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=None, fs=None):
+def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=None, fs=None, debug=False):
     """
     Run the ice thickness inversion and mass balance model to get binned annual ice thickness evolution
-
-    Parameters
-    ----------
-
-    Returns
-    -------
-    out: dict
-        dictionary object containing binned initial surface height, monthly climatic mass balance, and annual thickness
     """
+    if debug:
+        print(f'binned_mb_calc() modelprms: {modelprms}')
     nyears = int(gdir.dates_table.shape[0]/12) # number of years from dates table
-
     # perform OGGM ice thickness inversion
     if not gdir.is_tidewater or not pygem_prms.include_calving:
         # Perform inversion based on PyGEM MB using reference directory
@@ -212,7 +213,6 @@ def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multipli
             else:
                 raise
 
-        # Water Level
         # Check that water level is within given bounds
         cls = gdir.read_pickle('inversion_input')[-1]
         th = cls['hgt'][-1]
@@ -233,12 +233,30 @@ def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multipli
                                     )
 
         # run glacier dynamics model forward
-        if oggm_version > 1.301:
-            diag = ev_model.run_until_and_store(nyears)
-        else:
-            _, diag = ev_model.run_until_and_store(nyears)
+        ev_model.run_until_and_store(nyears)
 
-        return nfls[0].surface_h, mbmod.glac_bin_massbalclim, mbmod.glac_bin_icethickness_annual
+        t1_idx = gdir.mbdata['t1_idx']
+        t2_idx = gdir.mbdata['t2_idx']
+        nyears = gdir.mbdata['nyears']
+        mb_mwea = mbmod.glac_wide_massbaltotal[t1_idx:t2_idx+1].sum() / mbmod.glac_wide_area_annual[0] / nyears
+
+
+        # Update the latest thickness
+        if ev_model is not None:
+            fl_widths_m = getattr(ev_model.fls[0], 'widths_m', None)
+            fl_section = getattr(ev_model.fls[0],'section',None)
+        else:
+            fl_widths_m = getattr(nfls[0], 'widths_m', None)
+            fl_section = getattr(nfls[0],'section',None)
+        if fl_section is not None and fl_widths_m is not None:                                
+            # thickness
+            icethickness_t0 = np.zeros(fl_section.shape)
+            icethickness_t0[fl_widths_m > 0] = fl_section[fl_widths_m > 0] / fl_widths_m[fl_widths_m > 0]
+            mbmod.glac_bin_icethickness_annual[:,-1] = icethickness_t0
+
+        if debug:
+            print(f'specific mass balance = {np.round(mb_mwea,2)} mwea')
+        return nfls[0].surface_h, mbmod.glac_bin_massbalclim, mbmod.glac_bin_icethickness_annual, mb_mwea
 
 
 def get_bin_thick_monthly(bin_massbalclim_monthly, bin_thick_annual):
@@ -264,9 +282,10 @@ def get_bin_thick_monthly(bin_massbalclim_monthly, bin_thick_annual):
         ndarray containing the binned monthly ice thickness
         shape : [#elevbins, #months]
     """
-    # get annual cumulative climatic mass balance - requires reshaping monthly binned values and summing every 12 months
+    # get annual climatic mass balance from monthly climatic mass balance - requires reshaping monthly binned values and summing every 12 months
     bin_massbalclim_annual = bin_massbalclim_monthly.reshape(bin_massbalclim_monthly.shape[0],bin_massbalclim_monthly.shape[1]//12,-1).sum(2)
 
+    # bin_thick_annual = bin_thick_annual[:,:-1]
     # get change in thickness from previous year for each elevation bin
     delta_thick_annual = np.diff(bin_thick_annual, axis=-1)
 
@@ -274,25 +293,22 @@ def get_bin_thick_monthly(bin_massbalclim_monthly, bin_thick_annual):
     # account for density contrast (convert climatic mass balance in m w.e. to m ice)
     flux_div_annual =   (
                 (bin_massbalclim_annual * 
-                (pygem_prms.density_ice / pygem_prms.density_water)) - 
-                delta_thick_annual
-                        )
+                (pygem_prms.density_ice / 
+                pygem_prms.density_water)) - 
+                delta_thick_annual)
 
     # we'll assume the flux divergence is constant througohut the year (is this a good assumption?)
-    # ie. take annual values and divide by 12 - use numpy tile to repeat monthly values by 12 months
-    flux_div_monthly = np.tile(flux_div_annual / 12, 12)
-
-    # get binned total mass balance (binned climatic mass balance + binned monthly flux divergence)
-    # bin_mbtot_monthly = bin_massbalclim_monthly + flux_div_monthly
+    # ie. take annual values and divide by 12 - repeat monthly values across 12 months
+    flux_div_monthly = np.repeat(flux_div_annual / 12, 12, axis=1)
 
     # get monthly binned change in thickness assuming constant flux divergence throughout the year
     # account for density contrast (convert monthly climatic mass balance in m w.e. to m ice)
     delta_thick_monthly =   (
                 (bin_massbalclim_monthly * 
-                (pygem_prms.density_ice / pygem_prms.density_water)) - 
-                flux_div_monthly
-                            )
-    
+                (pygem_prms.density_ice / 
+                pygem_prms.density_water)) - 
+                flux_div_monthly)
+
     # get binned monthly thickness = running thickness change + initial thickness
     running_delta_thick_monthly = np.cumsum(delta_thick_monthly, axis=-1)
     bin_thick_monthly =  running_delta_thick_monthly + bin_thick_annual[:,0][:,np.newaxis] 
@@ -532,36 +548,7 @@ def get_rgi7id(rgi6id='', debug=False):
     rgi7id = rgi7_6_df.loc[lambda rgi7_6_df: rgi7_6_df['rgi6_id'] == rgi6id,'rgi7_id'].tolist()[0]
     if debug:
         print(f'RGI6:{rgi6id} -> RGI7:{rgi7id}')
-
     return rgi7id
-
-
-def get_oib_dates(rgi7id='', debug=False):
-    """
-    return Pandas Series object containing Operation IceBridge survey dates (sorted ascendingly)
-    """
-    oib_fpath = glob.glob(pygem_prms.oib_fp  + f'/diffstats5_*{rgi7id}*.json')
-    if len(oib_fpath)==0:
-        return
-    else:
-        oib_fpath = oib_fpath[0]
-    # load diffstats file
-    with open(oib_fpath, 'rb') as f:
-        oib_dict = json.load(f)
-
-    # get sorted list of all month-year datastamps in datafile (add one month to the oib survey dates to be more consistent with PyGEM model timestamps)
-    oib_dates = []
-    seasons = list(set(oib_dict.keys()).intersection(['march','may','august']))
-    for ssn in seasons:
-        for yr in list(oib_dict[ssn].keys()):
-            doy_int = int(np.ceil(oib_dict[ssn][yr]['mean_doy']))
-            dt_obj = datetime.datetime.strptime(f'{int(yr)}-{doy_int}', '%Y-%j')
-            oib_dates.append(date_check(dt_obj))
-    oib_dates.sort()
-    if debug:
-        print(f'OIB survey dates:\n{", ".join([str(dt.year)+"-"+str(dt.month)+"-"+str(dt.day) for dt in oib_dates])}')
-
-    return pd.Series(oib_dates)
 
 
 def date_check(dt_obj):
@@ -576,31 +563,204 @@ def date_check(dt_obj):
     return dt_obj_
 
 
-# def load_oib(rgi6id=None, pygem_bin_edges=None, debug=False):
+def load_oib(rgi7id):
+    """
+    load Operation IceBridge data
+    """
+    oib_fpath = glob.glob(pygem_prms.oib_fp  + f'/diffstats5_*{rgi7id}*.json')
+    if len(oib_fpath)==0:
+        return
+    else:
+        oib_fpath = oib_fpath[0]
+    # load diffstats file
+    with open(oib_fpath, 'rb') as f:
+        oib_dict = json.load(f)
+    return oib_dict
 
-    # loop through survey dates, aggregate to PyGEM bins and get OIB elevation differences from COP30
-    # for sd in survey_times:
-        # pass
 
-    # edges = np.asarray(oib_diff_dict[season[0]][list(oib_diff_dict[season[0]].keys())[0]]['bin_vals']['bin_start_vec'])
-    # edges = np.append(edges,np.asarray(oib_diff_dict[season[0]][list(oib_diff_dict[season[0]].keys())[0]]['bin_vals']['bin_stop_vec'][-1]))
-    # centers = (np.asarray(oib_diff_dict[season[0]][list(oib_diff_dict[season[0]].keys())[0]]['bin_vals']['bin_start_vec']) + 
-    #             np.asarray(oib_diff_dict[season[0]][list(oib_diff_dict[season[0]].keys())[0]]['bin_vals']['bin_stop_vec'])) / 2
+def oib_filter_on_pixel_count(arr, pctl = 15):
+    """
+    filter oib diffs by perntile pixel count
+    """
+    arr=arr.astype(float)
+    arr[arr==0] = np.nan
+    mask = arr < np.nanpercentile(arr,pctl)
+    arr[mask] = np.nan
+    return arr
 
-    # bin_area_means, bin_area_edges, _ = scipy.stats.binned_statistic(x=centers, values=cop30_area, statistic=np.nanmean, bins=nbins)
 
-        # # first set zeros to nan so we aren't skewed by no data counts
-        # masked=arr.astype(float)
-        # masked[masked==0] = np.nan
+def oib_terminus_mask(survey_date, cop30_diffs, debug=False):
+    """
+    create mask of missing terminus ice using last oib survey
+    """
+    try:
+        # find peak we'll bake in the assumption that terminus thickness has decreased over time - we'll thus look for a trough if yr>=2013 (cop30 date)
+        if survey_date.year<2013:
+            arr = cop30_diffs
+        else:
+            arr = -1*cop30_diffs
+        pk = signal.find_peaks(arr, distance=200)[0][0]
+        if debug:
+            plt.figure()
+            plt.plot(cop30_diffs)
+            plt.axvline(pk,c='r')
+            plt.show()
 
-        # ftype = filt['type']
-        # if ftype=='percentage':
-        #     if 'threshold' in filt.keys():
-        #         pctg = filt['threshold']
-        #     else:
-        #         pctg=10
-        #     mask = arr < np.nanpercentile(masked,pctg)
-    
+        return(np.arange(0,pk+1,1))
+
+    except Exception as err:
+        if debug:
+            print(f'_filter_terminus_missing_ice error: {err}')
+    return []
+
+
+def get_oib_diffs(oib_dict, debug=False):
+    """
+    loop through OIB dataset, get double differences
+    diffs_stacked: np.ndarray (#bins, #surveys)
+    """
+    seasons = list(set(oib_dict.keys()).intersection(['march','may','august']))
+    cop30_diffs_list = [] # instantiate list to hold median binned survey differences from cop30
+    oib_dates = [] # instantiate list to hold survey dates
+    for ssn in seasons:
+        for yr in list(oib_dict[ssn].keys()):
+            # get survey date
+            doy_int = int(np.ceil(oib_dict[ssn][yr]['mean_doy']))
+            dt_obj = datetime.datetime.strptime(f'{int(yr)}-{doy_int}', '%Y-%j')
+            oib_dates.append(date_check(dt_obj))
+            # get survey data and filter by pixel count
+            diffs = np.asarray(oib_dict[ssn][yr]['bin_vals']['bin_median_diffs_vec'])
+            diffs = oib_filter_on_pixel_count(diffs, 10)
+            cop30_diffs_list.append(diffs)
+    # sort by survey dates
+    inds = np.argsort(oib_dates).tolist()
+    oib_dates = [oib_dates[i] for i in inds]
+    cop30_diffs_list = [cop30_diffs_list[i] for i in inds]
+    # filter missing ice at terminus based on last survey
+    terminus_mask = oib_terminus_mask(oib_dates[-1], cop30_diffs_list[-1], debug=False)    
+    if debug:
+        print(f'OIB survey dates:\n{", ".join([str(dt.year)+"-"+str(dt.month)+"-"+str(dt.day) for dt in oib_dates])}')
+    # do double differencing
+    diffs_stacked = np.column_stack(cop30_diffs_list)
+    # apply terminus mask across all surveys
+    diffs_stacked[terminus_mask,:] = np.nan
+    # get bin centers
+    bin_centers = (np.asarray(oib_dict[ssn][list(oib_dict[ssn].keys())[0]]['bin_vals']['bin_start_vec']) + 
+                np.asarray(oib_dict[ssn][list(oib_dict[ssn].keys())[0]]['bin_vals']['bin_stop_vec'])) / 2
+    return bin_centers, diffs_stacked, pd.Series(oib_dates)
+
+
+def oib_model_fx(params, gdir, modelprms, glacier_rgi_table, fls, glen_a_mult, fs):
+    modelprms['kp'] = params[0]
+    modelprms['tbias'] = params[1]
+    modelprms['ddfsnow'] = params[2]
+    surf_h_init, bin_massbalclim_monthly, bin_thickness_annual, mbmwea = binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=fls, glen_a_multiplier=glen_a_mult, fs=fs)
+    bin_thick_monthly = get_bin_thick_monthly(bin_massbalclim_monthly, bin_thickness_annual)
+    return surf_h_init, bin_thick_monthly, mbmwea
+
+
+def oib_objective_fx(params, gdir, modelprms, glacier_rgi_table, fls, glen_a, fs, oib_centers, oib_diffs, inds_in_oib, debug=False, error_type='l2'):
+    try:
+        surf_h_init, model_monthly_thick, _ = oib_model_fx(params, gdir, modelprms, glacier_rgi_table, fls, glen_a, fs)
+        # get time index for 2013
+        refidx = np.where(gdir.dates_table.date.values==datetime.datetime(year=2013, month=1, day=1))[0][0]
+        model_diffs = model_monthly_thick - model_monthly_thick[:,refidx][:,np.newaxis]
+        # only retain time steps where oib data exists
+        model_diffs = model_diffs[:,inds_in_oib]
+        # aggregate both model and obs to 100 m bins
+        nbins = int(np.ceil((oib_centers[-1] - oib_centers[0]) / 100))
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore')
+            y = np.column_stack([stats.binned_statistic(x=oib_centers, values=x, statistic=np.nanmean, bins=nbins)[0] for x in oib_diffs.T])
+            bin_edges = stats.binned_statistic(x=oib_centers, values=oib_diffs[:,0], statistic=np.nanmean, bins=nbins)[1]
+            y_pred = np.column_stack([stats.binned_statistic(x=surf_h_init, values=x, statistic=np.nanmean, bins=bin_edges)[0] for x in model_diffs.T])
+        # get indices where model output and obs are not nan
+        mask = [np.logical_and(~np.isnan(a), ~np.isnan(b)) for a, b in zip(y.T, y_pred.T)]
+        mask = np.column_stack(mask)
+        if error_type == 'l1':
+            mf = np.sum(np.abs(y_pred[mask] - y[mask]))
+        elif error_type == 'l2':
+            mf = np.sum((y_pred[mask] - y[mask]) ** 2)
+        elif error_type == 'rmse':
+            mf = np.sqrt(np.mean((y_pred[mask] - y[mask]) ** 2))
+        elif error_type == 'mad':
+            mf =  np.mean(np.abs(y_pred[mask] - y[mask]))
+        return mf
+    except Exception as err:
+        if debug:
+            print(f'oib_objective_fx() error: {err}')
+        return np.inf
+
+
+def oib_optimize_wrapper(oggmparams_dict, oggmpaths_dict, cfg, initial_guess, gdir, modelprms, glacier_rgi_table, fls, glen_a, fs, oib_centers, oib_diffs, inds_in_oib, debug):
+    # retain oggm config state from main()
+    cfg = importlib.import_module(cfg)
+    cfg.PARAMS = oggmparams_dict
+    cfg.PATHS = oggmpaths_dict
+    result = fmin_bfgs(oib_objective_fx, initial_guess, args = (gdir, modelprms, glacier_rgi_table, fls, glen_a, fs, oib_centers, oib_diffs, inds_in_oib, debug), disp=False)
+    # get loss
+    loss_value = oib_objective_fx(result, gdir, modelprms, glacier_rgi_table, fls, glen_a, fs, oib_centers, oib_diffs, inds_in_oib)
+    return result, loss_value
+
+
+def plot_oib_opt(params, gdir, modelprms, glacier_rgi_table, fls, glen_a, fs, oib_centers, oib_diffs, inds_in_oib, survey_dates, glacno):
+    model_surf_h_init, model_monthly_thick, mbmwea = oib_model_fx(params, gdir, modelprms, glacier_rgi_table, fls, glen_a, fs)
+    # get misfit between obs and model
+    misfit = oib_objective_fx(params, gdir, modelprms, glacier_rgi_table, fls, glen_a, fs, oib_centers, oib_diffs, inds_in_oib, debug=False, error_type='l2')
+    # get 2013 model time step index
+    refidx = np.where(gdir.dates_table.date.values==datetime.datetime(year=2013, month=1, day=1))[0][0]
+    # subtract off from 2013 thickness
+    model_diffs = model_monthly_thick - model_monthly_thick[:,refidx][:,np.newaxis]
+    # only retain time steps where oib data exists
+    model_diffs = model_diffs[:,inds_in_oib]
+    # get double diffs
+    model_dbl_diffs = np.diff(model_monthly_thick[:,inds_in_oib], axis=1)
+    # get oib double diffs
+    oib_dbl_diffs = np.diff(oib_diffs, axis=1)
+
+    # plot
+    fig,axs = plt.subplots(ncols=2,nrows=2,figsize=(6.5,5), sharex=True, sharey='row', gridspec_kw = {'wspace':0.1, 'hspace':0.1})
+    for ax in axs.flatten():
+        ax.axhline(y=0,c='k',ls=':',lw=1)
+
+    cmlist = cmocean.cm.matter_r(np.linspace(0,1, oib_diffs.shape[1]))
+    for i in range(oib_diffs.shape[1]):
+        try:
+            axs[0,0].plot(oib_centers,oib_diffs[:,i],c=cmlist[i])
+        except:
+            pass
+        dt = survey_dates.iloc[i]
+        axs[0,1].plot(model_surf_h_init, model_diffs[:,i], c=cmlist[i], label=str(dt.year)+"-"+str(dt.month))
+    axs[0,1].legend(fontsize=7, loc='upper right', handlelength=1, borderaxespad=0)
+    axs[0,0].set_title('NASA OIB',size=10)
+    axs[0,1].set_title('PyGEM',size=10)
+    axs[0,0].set_xlim([model_surf_h_init.min(), model_surf_h_init.max()])
+
+    cmlist = cmocean.cm.matter_r(np.linspace(0,1, model_dbl_diffs.shape[1]))
+    axs[1,1].plot([], [], ' ', label='yyyy-doy1:yyyy-doy2')           
+    for i in range(model_dbl_diffs.shape[1]):
+        try:
+            axs[1,0].plot(oib_centers,oib_dbl_diffs[:,i],c=cmlist[i])
+        except:
+            pass
+        dt0 = survey_dates.iloc[i]
+        dt1 = survey_dates.iloc[i+1]
+        axs[1,1].plot(model_surf_h_init,model_dbl_diffs[:,i], c=cmlist[i], label=f'{dt0.year}-{dt0.month} : {dt1.year}-{dt1.month}')
+    axs[1,1].legend(fontsize=7, loc='upper right', handlelength=1, borderaxespad=0)
+    axs[1,0].text(0.5, .05, 'elevation (m)', size=10, horizontalalignment='center', 
+                    verticalalignment='center', transform=fig.transFigure)
+    axs[1,0].text(.05, .5, 'elevation change (m)', size=10, horizontalalignment='center', 
+                    verticalalignment='center', rotation=90, transform=fig.transFigure)
+    axs[0,0].text(0.5, .95, f'{glacno}\nkp:{np.round(params[0],2)}, tbias:{np.round(params[1],2)}, ddfsnow:{np.round(params[2],4)}, mbmwea:{np.round(mbmwea,2)}, misfit:{np.round(misfit,2)}', size=10, horizontalalignment='center', 
+                    verticalalignment='center', transform=fig.transFigure)
+    fig.tight_layout()
+    plt.show()
+    fig.savefig(f'/trace/group/rounce/btober/out/figs/oib-ak_grad_descent/{rgi_id}_gd.png',dpi=400)
+    # plt.show(block=False)
+    # plt.pause(3)
+    # plt.close()
+
+
 #%%
 def main(list_packed_vars):
     """
@@ -635,6 +795,8 @@ def main(list_packed_vars):
     dates_table = modelsetup.datesmodelrun(
             startyear=pygem_prms.ref_startyear, endyear=pygem_prms.ref_endyear, spinupyears=pygem_prms.ref_spinupyears,
             option_wateryear=pygem_prms.ref_wateryear)
+    if debug:
+        print(f'model time period:\n{dates_table}')
 
     # ===== LOAD CLIMATE DATA =====
     # Climate class
@@ -653,7 +815,7 @@ def main(list_packed_vars):
     gcm_elev = gcm.importGCMfxnearestneighbor_xarray(gcm.elev_fn, gcm.elev_vn, main_glac_rgi)
     # Lapse rate [degC m-1]
     gcm_lr, gcm_dates = gcm.importGCMvarnearestneighbor_xarray(gcm.lr_fn, gcm.lr_vn, main_glac_rgi, dates_table)
-    
+
     # ===== LOOP THROUGH GLACIERS TO RUN CALIBRATION =====
     for glac in range(main_glac_rgi.shape[0]):
         
@@ -678,7 +840,7 @@ def main(list_packed_vars):
                 
             fls = gdir.read_pickle('inversion_flowlines')
             glacier_area = fls[0].widths_m * fls[0].dx_meter
-            
+
             # Add climate data to glacier directory
             gdir.historical_climate = {'elev': gcm_elev[glac],
                                       'temp': gcm_temp[glac,:],
@@ -689,8 +851,6 @@ def main(list_packed_vars):
 
             # ----- Calibration data -----
             try:
-                # oib_dat = load_oib(glacier_str, debug=debug)
-
                 mbdata_fn = gdir.get_filepath('mb_obs')
                 if not os.path.exists(mbdata_fn):
                     # Compute all the stuff
@@ -738,7 +898,7 @@ def main(list_packed_vars):
                     print('  mb_data (mwea): ' + str(np.round(mb_obs_mwea,2)) + ' +/- ' + str(np.round(mb_obs_mwea_err,2)))
                 
                     
-            except:
+            except Exception as err:
                 gdir.mbdata = None
                 
                 # LOG FAILURE
@@ -767,6 +927,82 @@ def main(list_packed_vars):
                         'tsnow_threshold': pygem_prms.tsnow_threshold,
                         'precgrad': pygem_prms.precgrad}
             
+            #%% ===== GRADIENT DESCENT =====
+            if pygem_prms.option_calibration == 'gradient_descent':
+                if pygem_prms.opt_calib_monthly_thick:
+                    # get rgi7id to load oib data
+                    rgi7id = get_rgi7id(glacier_str, debug=debug)
+                    oib_dict = load_oib(rgi7id)
+                    # get oib diffs
+                    oib_centers, oib_diffs, oib_dates = get_oib_diffs(oib_dict=oib_dict, debug=debug)
+                    # only retain diffs for survey dates where we have pygem data
+                    oib_inds_in_pygem = np.intersect1d(oib_dates.to_numpy(), gdir.dates_table.date.to_numpy(), return_indices=True)[1]
+                    oib_diffs = oib_diffs[:,oib_inds_in_pygem]
+                    oib_dates = oib_dates[oib_inds_in_pygem]
+                    # get pygem time step indices where we have oib data
+                    inds_in_oib = np.intersect1d(gdir.dates_table.date.to_numpy(), oib_dates.to_numpy(), return_indices=True)[1]
+
+                    # get glen_a
+                    if pygem_prms.use_reg_glena:
+                        glena_df = pd.read_csv(pygem_prms.glena_reg_fullfn)                    
+                        glena_O1regions = [int(x) for x in glena_df.O1Region.values]
+                        assert glacier_rgi_table.O1Region in glena_O1regions, ' O1 region not in glena_df'
+                        glena_idx = np.where(glena_O1regions == glacier_rgi_table.O1Region)[0][0]
+                        glen_a_multiplier = glena_df.loc[glena_idx,'glens_a_multiplier']
+                        fs = glena_df.loc[glena_idx,'fs']
+                    else:
+                        fs = pygem_prms.fs
+                        glen_a_multiplier = pygem_prms.glen_a_multiplier     
+                    # perform gradient descent to get pygem model parameters
+                    steps = 4
+                    param_ranges = [
+                        np.linspace(.5, 8.0, steps),    # Range for kp
+                        np.linspace(-1, 5, steps),      # Range for tbias
+                        np.linspace(.001, .01, steps)   # Range for parameter ddfsnow
+                    ]
+                    # create a list of all parameter combinations to test
+                    param_grid = [(x, y, z) for x in param_ranges[0] for y in param_ranges[1] for z in param_ranges[2]]
+
+                    # use multiprocessing.Pool to distribute tasks
+                    with multiprocessing.Pool(processes=4) as pool:
+                        t0 = time.time()
+                        if args.kp and args.tbias and args.ddfsnow:
+                            best_params = [args.kp, args.tbias, args.ddfsnow]
+                            best_loss= None
+                        else:
+                            results = pool.map(
+                                partial(oib_optimize_wrapper, cfg.PARAMS, cfg.PATHS, 'oggm.cfg',
+                                        gdir=gdir, 
+                                        modelprms=modelprms, 
+                                        glacier_rgi_table=glacier_rgi_table, 
+                                        fls=fls, 
+                                        glen_a=glen_a_multiplier, 
+                                        fs=fs, 
+                                        oib_centers=oib_centers, 
+                                        oib_diffs=oib_diffs, 
+                                        inds_in_oib=inds_in_oib, 
+                                        debug=debug),
+                                        param_grid)
+                            # find the best result from all optimizations
+                            best_params, best_loss = min(results, key=lambda x: x[1])
+                        if debug:
+                            print('parameter optimization processing time:', time.time()-t0, 's')
+                            print(f'optimized parameters: {best_params}')
+                            print(f'misfit: {best_loss}')
+                            plot_oib_opt(best_params,
+                                    gdir=gdir, 
+                                    modelprms=modelprms, 
+                                    glacier_rgi_table=glacier_rgi_table, 
+                                    fls=fls, 
+                                    glen_a=glen_a_multiplier, 
+                                    fs=fs, 
+                                    oib_centers=oib_centers, 
+                                    oib_diffs=oib_diffs, 
+                                    inds_in_oib=inds_in_oib,
+                                    survey_dates=oib_dates,
+                                    glacno=glacier_str)
+
+
             #%% ===== EMULATOR TO SETUP MCMC ANALYSIS AND/OR RUN HH2015 WITH EMULATOR =====
             # - precipitation factor, temperature bias, degree-day factor of snow
             if pygem_prms.option_calibration == 'emulator':
@@ -904,7 +1140,7 @@ def main(list_packed_vars):
                         sims_dict = {} 
 
                         # get oib survey dates for glacier - we'll only emulate glacier thickness/mass balance at these time steps
-                        oib_dates = get_oib_dates(rgi7id=get_rgi7id(glacier_str, debug=debug), debug=debug)
+                        # oib_dates = get_oib_dates(rgi7id=get_rgi7id(glacier_str, debug=debug), debug=debug)
 
                         # get glen_a multiplier for ice thickness mass conservation inversion
                         if pygem_prms.use_reg_glena:
@@ -931,7 +1167,10 @@ def main(list_packed_vars):
                         # output array will be time, elevation (of bin), model parameters, mass balance at that bin
                         # Option get monthly bin thickness
                         if pygem_prms.opt_calib_monthly_thick:
-                            surf_h_init, bin_massbalclim_monthly, bin_thickness_annual = binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=fls, glen_a_multiplier=glen_a_multiplier, fs=fs)
+                            try:
+                                surf_h_init, bin_massbalclim_monthly, bin_thickness_annual = binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=fls, glen_a_multiplier=glen_a_multiplier, fs=fs)
+                            except:
+                                continue
                             # calculate binned monthly ice thickness - ravel so that output dimension is len(r*c), where r is the number of time steps and c is the number of elevaiton bins
                             bin_thick_monthly = get_bin_thick_monthly(bin_massbalclim_monthly, bin_thickness_annual)
                             # only retain bin_mbtot_monthly where we have oib data for reducing computational cost of emulator
@@ -943,7 +1182,7 @@ def main(list_packed_vars):
                             # update sims_dict - we'll need to repeat parameters nxm times (where n is the number of elevation bins, m is the number of time steps)                        
                             sims_dict = dict_append(
                                                     dictionary = sims_dict,
-                                                    keys=   ['tbias','kp','ddfsnow','time','bin_h_init','bin_thick_monthly'],
+                                                    keys =   ['tbias','kp','ddfsnow','time','bin_h_init','bin_thick_monthly'],
                                                     vals =  [
                                                             np.repeat(modelprms['tbias'], len(bin_thick_monthly)).tolist(), 
                                                             np.repeat(modelprms['kp'], len(bin_thick_monthly)).tolist(), 
@@ -957,6 +1196,8 @@ def main(list_packed_vars):
                             if nsim==0 and debug:
                                 print(pd.DataFrame(sims_dict).head())
                                 print(pd.DataFrame(sims_dict).tail())
+
+                            # need to sparsify this emulator training data - could randonly select, or perhaps select from upper and lower 25th percentiles of glacier
 
                         else:
                             # number of bins that have negative clim. mass balance for a given year, mass balance for 2000-2019 period, optionally return binned monthly climatic mass balance
@@ -1148,7 +1389,6 @@ def main(list_packed_vars):
                             
                         return modelprms, mb_mwea_mid
 
-                    print(sims_dict)
                     # ===== SET THINGS UP ======
                     sims_df = pd.DataFrame(sims_dict)
                     if debug:
@@ -1602,7 +1842,7 @@ if __name__ == '__main__':
     parser = getparser()
     args = parser.parse_args()
 
-    if args.debug == 1:
+    if args.debug:
         debug = True
     else:
         debug = False
@@ -1627,7 +1867,7 @@ if __name__ == '__main__':
         glac_no = list(main_glac_rgi_all['rgino_str'].values)
 
     # Number of cores for parallel processing
-    if args.option_parallels != 0:
+    if args.option_parallels:
         num_cores = int(np.min([len(glac_no), args.num_simultaneous_processes]))
     else:
         num_cores = 1
@@ -1645,7 +1885,7 @@ if __name__ == '__main__':
         list_packed_vars.append([count, glac_no_lst, gcm_name])
 
     # Parallel processing
-    if args.option_parallels != 0:
+    if args.option_parallels:
         print('Processing in parallel with ' + str(args.num_simultaneous_processes) + ' cores...')
         with multiprocessing.Pool(args.num_simultaneous_processes) as p:
             p.map(main,list_packed_vars)
@@ -1654,7 +1894,7 @@ if __name__ == '__main__':
         # Loop through the chunks and export bias adjustments
         for n in range(len(list_packed_vars)):
             main(list_packed_vars[n])
-
+    
 
 
     print('Total processing time:', time.time()-time_start, 's')

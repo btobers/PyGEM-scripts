@@ -18,12 +18,7 @@ from scipy.optimize import minimize
 from scipy import stats
 #import xarray as xr
 
-# Local libraries
-try:
-    import pygem
-except:
-    print('---------\nPyGEM DEV\n---------')
-    sys.path.append(os.getcwd() + '/../PyGEM/')
+import pygem
 import pygem_input as pygem_prms
 from pygem import class_climate
 from pygem.massbalance import PyGEMMassBalance
@@ -92,8 +87,8 @@ def getparser():
                         help='reference gcm name')
     parser.add_argument('-num_simultaneous_processes', action='store', type=int, default=4,
                         help='number of simultaneous processes (cores) to use')
-    parser.add_argument('-option_parallels', action='store', type=int, default=1,
-                        help='Switch to use or not use parallels (1 - use parallels, 0 - do not)')
+    parser.add_argument('-option_parallels', action='store_true',
+                        help='Flag to use process in parallel')
     parser.add_argument('-rgi_glac_number_fn', action='store', type=str, default=None,
                         help='Filename containing list of rgi_glac_number, helpful for running batches on spc')
     parser.add_argument('-option_ordered', action='store', type=int, default=1,
@@ -177,7 +172,7 @@ def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multipli
 
     # perform OGGM ice thickness inversion
     if not gdir.is_tidewater or not pygem_prms.include_calving:
-        # Perform inversion based on PyGEM MB using reference directory
+        # Perform inversion based on PyGEM MB using reference directorya
         mbmod_inv = PyGEMMassBalance(gdir, modelprms, glacier_rgi_table,
                                         hindcast=pygem_prms.hindcast,
                                         debug=pygem_prms.debug_mb,
@@ -523,11 +518,7 @@ def main(list_packed_vars):
     
     parser = getparser()
     args = parser.parse_args()
-
-    if args.debug == 1:
-        debug = True
-    else:
-        debug = False
+    debug = args.debug
 
     # ===== LOAD GLACIERS =====
     main_glac_rgi = modelsetup.selectglaciersrgitable(glac_no=glac_no)
@@ -2791,7 +2782,7 @@ def main(list_packed_vars):
                 text_file.write(glacier_str + ' had no flowlines or mb_data.')
 
     # Global variables for Spyder development
-    if args.option_parallels == 0:
+    if args.option_parallels:
         global main_vars
         main_vars = inspect.currentframe().f_locals
 
@@ -2802,7 +2793,7 @@ if __name__ == '__main__':
     parser = getparser()
     args = parser.parse_args()
 
-    if args.debug == 1:
+    if args.debug:
         debug = True
     else:
         debug = False
@@ -2827,7 +2818,7 @@ if __name__ == '__main__':
         glac_no = list(main_glac_rgi_all['rgino_str'].values)
 
     # Number of cores for parallel processing
-    if args.option_parallels != 0:
+    if args.option_parallels:
         num_cores = int(np.min([len(glac_no), args.num_simultaneous_processes]))
     else:
         num_cores = 1
@@ -2845,7 +2836,7 @@ if __name__ == '__main__':
         list_packed_vars.append([count, glac_no_lst, gcm_name])
 
     # Parallel processing
-    if args.option_parallels != 0:
+    if args.option_parallels:
         print('Processing in parallel with ' + str(args.num_simultaneous_processes) + ' cores...')
         with multiprocessing.Pool(args.num_simultaneous_processes) as p:
             p.map(main,list_packed_vars)

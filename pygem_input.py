@@ -6,10 +6,8 @@ from datetime import datetime
 # External libraries
 import numpy as np
 # Local libaries
-try:
-    import pygem
-except:
-    sys.path.append(os.getcwd() + '/../PyGEM/')
+import pygem
+
 from pygem.utils._funcs_selectglaciers import get_same_glaciers, glac_num_fromrange, glac_fromcsv, glac_wo_cal
 
 
@@ -35,10 +33,11 @@ rgi_glac_number = 'all'
 glac_no_skip = None
 glac_no = None 
 # glac_no = ['15.03733'] # Khumbu Glacier
-glac_no = ['1.10689'] # Columbia Glacier
+# glac_no = ['1.10689'] # Columbia Glacier
 # glac_no = ['1.03622'] # LeConte Glacier
-glac_no = ['1.15769']
-# glac_no = ['1.22193']
+# glac_no = ['1.15769']   # nabesna
+glac_no = ['1.22193'] # kahiltna
+# glac_no = ['1.15645'] # kennicott
 
 
 if glac_no is not None:
@@ -53,15 +52,15 @@ include_tidewater = True               # Switch to include marine-terminating gl
 include_calving = True                 # Switch to ignore calving and treat tidewater glaciers as land-terminating
 
 oggm_base_url = 'https://cluster.klima.uni-bremen.de/~oggm/gdirs/oggm_v1.6/L1-L2_files/elev_bands/'
-logging_level = 'WORKFLOW'             # DEBUG, INFO, WARNING, ERROR, WORKFLOW, CRITICAL (recommended WORKFLOW)
+logging_level = 'ERROR'             # DEBUG, INFO, WARNING, ERROR, WORKFLOW, CRITICAL (recommended WORKFLOW)
 oggm_border = 240                      # 10, 80, 160, 240 (recommend 240 if expecting glaciers for long runs where glaciers may grow)
 
 #%% ===== CLIMATE DATA AND TIME PERIODS ===== 
 # Reference period runs (reference period refers to the calibration period)
 #   This will typically vary between 1980-present
 ref_gcm_name = 'ERA5'               # reference climate dataset
-ref_startyear = 2000                # first year of model run (reference dataset)
-ref_endyear = 2019                  # last year of model run (reference dataset)
+ref_startyear = 1990                # first year of model run (reference dataset)
+ref_endyear = 2021                  # last year of model run (reference dataset)
 ref_wateryear = 'calendar'          # options for years: 'calendar', 'hydro', 'custom'
 ref_spinupyears = 0                 # spin up years
 if ref_spinupyears > 0:
@@ -86,7 +85,7 @@ if hindcast:
 
 #%% ===== CALIBRATION OPTIONS =====
 # Calibration option ('emulator', 'MCMC', 'MCMC_fullsim' 'HH2015', 'HH2015mod', None)
-option_calibration = 'emulator'
+option_calibration = 'gradient_descent'
 
 # Prior distribution (specify filename or set equal to None)
 priors_reg_fullfn = main_directory + '/../Output/calibration/priors_region.csv'
@@ -115,10 +114,13 @@ elif option_calibration == 'HH2015mod':
     params2opt = ['tbias', 'kp']    # parameters to optimize
     ftol_opt = 1e-3                 # tolerance for SciPy optimization scheme
     eps_opt = 0.01                  # epsilon (adjust variables for jacobian) for SciPy optimization scheme (1e-6 works)
-    
+
+elif option_calibration == 'gradient_descent':
+    opt_calib_monthly_thick = True # Option to calibrate monthly binned glacier thickness
+
 elif option_calibration == 'emulator':
-    emulator_sims = 1             # Number of simulations to develop the emulator
-    overwrite_em_sims = True       # Overwrite emulator simulations
+    emulator_sims = 100             # Number of simulations to develop the emulator
+    overwrite_em_sims = False       # Overwrite emulator simulations
     opt_calib_monthly_thick = True # Option to calibrate monthly binned glacier thickness
     opt_hh2015_mod = True           # Option to also perform the HH2015_mod calibration using the emulator
     emulator_fp = output_filepath + 'emulator/'
@@ -247,7 +249,7 @@ export_binned_area_threshold = 0    # Area threshold for exporting binned ice th
 export_extra_vars = True            # Option to export extra variables (temp, prec, melt, acc, etc.)
 
 # OGGM glacier dynamics parameters
-if option_dynamics in ['OGGM', 'MassRedistributionCurves'] or (option_calibration == 'emulator' and opt_calib_monthly_thick):
+if option_dynamics in ['OGGM', 'MassRedistributionCurves'] or (option_calibration == 'emulator' and opt_calib_monthly_thick) or (option_calibration =='gradient_descent'):
     cfl_number = 0.02
     cfl_number_calving = 0.01
     glena_reg_fullfn = main_directory + '/../Output/calibration/glena_region.csv'
@@ -403,8 +405,7 @@ else:
     debris_fp = None
 
 # OIB surface elevation time data
-oib_fp = main_directory + '../OIB/lidar_cop30_deltas/'
-
+oib_fp = main_directory + '/../OIB/lidar_cop30_deltas/'
 
 #%% ===== MODEL TIME PERIOD DETAILS =====
 # Models require complete data for each year such that refreezing, scaling, etc. can be calculated
