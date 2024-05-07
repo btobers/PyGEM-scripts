@@ -35,7 +35,7 @@ glac_no = None
 # glac_no = ['15.03733'] # Khumbu Glacier
 # glac_no = ['1.10689'] # Columbia Glacier
 # glac_no = ['1.03622'] # LeConte Glacier
-# glac_no = ['1.15769']   # nabesna
+glac_no = ['1.15769']   # nabesna
 glac_no = ['1.22193'] # kahiltna
 # glac_no = ['1.15645'] # kennicott
 
@@ -85,7 +85,7 @@ if hindcast:
 
 #%% ===== CALIBRATION OPTIONS =====
 # Calibration option ('emulator', 'MCMC', 'MCMC_fullsim' 'HH2015', 'HH2015mod', None)
-option_calibration = 'gradient_descent'
+option_calibration = 'grid_search'
 
 # Prior distribution (specify filename or set equal to None)
 priors_reg_fullfn = main_directory + '/../Output/calibration/priors_region.csv'
@@ -115,12 +115,15 @@ elif option_calibration == 'HH2015mod':
     ftol_opt = 1e-3                 # tolerance for SciPy optimization scheme
     eps_opt = 0.01                  # epsilon (adjust variables for jacobian) for SciPy optimization scheme (1e-6 works)
 
+elif option_calibration == 'grid_search':
+    opt_calib_monthly_thick = True # Option to calibrate monthly binned glacier thickness
+
 elif option_calibration == 'gradient_descent':
     opt_calib_monthly_thick = True # Option to calibrate monthly binned glacier thickness
 
 elif option_calibration == 'emulator':
-    emulator_sims = 100             # Number of simulations to develop the emulator
-    overwrite_em_sims = False       # Overwrite emulator simulations
+    emulator_sims = 50             # Number of simulations to develop the emulator
+    overwrite_em_sims = True       # Overwrite emulator simulations
     opt_calib_monthly_thick = True # Option to calibrate monthly binned glacier thickness
     opt_hh2015_mod = True           # Option to also perform the HH2015_mod calibration using the emulator
     emulator_fp = output_filepath + 'emulator/'
@@ -221,7 +224,7 @@ icethickness_cal_frac_byarea = 0.9  # Regional glacier area fraction that is use
 #%% ===== SIMULATION AND GLACIER DYNAMICS OPTIONS =====
 # Glacier dynamics scheme (options: 'OGGM', 'MassRedistributionCurves', None)
 option_dynamics = None
-    
+
 # Bias adjustment option (options: 0, 1, 2, 3) 
 #  0: no adjustment
 #  1: new prec scheme and temp building on HH2015
@@ -249,7 +252,7 @@ export_binned_area_threshold = 0    # Area threshold for exporting binned ice th
 export_extra_vars = True            # Option to export extra variables (temp, prec, melt, acc, etc.)
 
 # OGGM glacier dynamics parameters
-if option_dynamics in ['OGGM', 'MassRedistributionCurves'] or (option_calibration == 'emulator' and opt_calib_monthly_thick) or (option_calibration =='gradient_descent'):
+if option_dynamics in ['OGGM', 'MassRedistributionCurves'] or (option_calibration == 'emulator' and opt_calib_monthly_thick) or (option_calibration =='gradient_descent') or (option_calibration =='grid_search'):
     cfl_number = 0.02
     cfl_number_calving = 0.01
     glena_reg_fullfn = main_directory + '/../Output/calibration/glena_region.csv'
