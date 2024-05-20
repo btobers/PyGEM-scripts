@@ -152,6 +152,13 @@ def dict_append(dictionary, keys=None, vals=None):
     return dictionary
 
 
+def index_closest(arr,val):
+    """
+    get index in an array or list closest to a specified value
+    """
+    return np.abs(np.asarray(arr) - val).argmin()
+    
+
 def mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=None, t1=None, t2=None):
     """
     Run the mass balance and calculate the mass balance [mwea]
@@ -363,15 +370,13 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
         torch.set_num_threads(1)
         
         assert y_cn in sims_dict.keys(), 'emulator error: y_cn not in sims_dict'
+        em_mod_fp = em_fp + 'models/' + glacier_str.split('.')[0].zfill(2) + '/'
 
         ##################        
         ### get X data ###
         ##################
-        Xs = []
-        # intersection of X variable names with possible options in function declaration
-        X_cns = list(set(X_cns).intersection(set(sims_dict.keys())))
-        for cn in X_cns:
-            Xs.append(sims_dict[cn])
+        X_cns = [cn for cn in X_cns if cn in sims_dict]
+        Xs = [sims_dict[cn] for cn in X_cns]
 
         # convert to numpy arrays
         X = np.column_stack((Xs))
@@ -429,7 +434,11 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
                 ax.set_xlabel('y_test')
                 ax.set_ylabel('y_pred')
                 ax.set_ylim([-3,3])
-                plt.show()
+                # plt.show()
+                f.tight_layout()
+                f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_prior_thick.png')
+                plt.close()
+
     
         # ----- Find optimal model hyperparameters -----
         model.train()
@@ -449,9 +458,8 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
             # Calc loss and backprop gradients
             loss = -mll(output, y_train)
             loss.backward()
-    #        if debug and i%100==0:
-    #            print(i, loss.item(), model.covar_module.base_kernel.lengthscale[0], 
-    #                  model.likelihood.noise.item())
+            if debug and i%100==0:
+                print(f'iteration = {i}, loss = {loss.item()}, covariance lengthscale = {model.covar_module.base_kernel.lengthscale[0].item()}, noise = {model.likelihood.noise.item()}')
             optimizer.step()
     
         # Plot posterior distributions (with test data on x-axis)
@@ -477,50 +485,95 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
                 ax.set_xlabel('y_test')
                 ax.set_ylabel('y_pred')
                 ax.set_ylim([-3,3])
-                plt.show()
+                # plt.show()
+                f.tight_layout()
+                f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_posterior_thick.png')
+                plt.close()
+
     
-        if debug and y_cn != 'bin_thick_monthly':
+        # if debug:
+        for batman in [0]:
             # Compare user-defined parameter sets within the emulator
             tbias_set = (np.arange(-7,4,0.5)).reshape(-1,1)
             kp_set = np.zeros(tbias_set.shape) + 1
             ddf_set = np.zeros(tbias_set.shape) + 0.0041
+            sets = []
+
+            # Convert the array into a 1D array of complex numbers
+            # where the real part represents the values from the first column
+            # and the imaginary part represents the values from the second column
+            complex_array = X[:, -2] + 1j * X[:, -1]
+
+            # Find the unique pairs of values
+            unique_pairs = np.unique(complex_array)
+
+            # Separate the real and imaginary parts to get the unique pairs
+            unique_pairs_real = unique_pairs.real
+            unique_pairs_imag = unique_pairs.imag
+
+            if y_cn=='bin_thick_monthly':
+                for t, h in zip(unique_pairs_real, unique_pairs_imag):
+                    # test set for time and elevation bin
+                    time_set = np.zeros(tbias_set.shape) + t
+                    elev_set = np.zeros(tbias_set.shape) + h
+                    sets.append(np.hstack((tbias_set, kp_set, ddf_set, time_set, elev_set)))
+            else:
+                sets.append(np.hstack((tbias_set, kp_set, ddf_set)))
+
+            out = []
+            for i,s in enumerate(sets):
+                # normalize test set values
+                modelprms_set_norm = (s - X_mean) / X_std
+        
+                y_set_norm = model(torch.tensor(modelprms_set_norm).to(torch.float)).mean.detach().numpy()
+                y_set = y_set_norm * y_std + y_mean
+        
+                f, ax = plt.subplots(1, 1, figsize=(4, 4))
+                # kp_1_idx = np.where(sim_dict['kp'] == 1)[0]
+                kp_1_idx = np.where(X[:,1] == 1)[0]
+                # ax.plot(sims_df.loc[kp_1_idx,'tbias'], sims_df.loc[kp_1_idx,y_cn])
+                ax.plot(X[kp_1_idx,0], y[kp_1_idx])
+                ax.plot(tbias_set,y_set,'.')
+                ax.set_xlabel('tbias (degC)')
+                if y_cn == 'mb_mwea':
+                    ax.set_ylabel('PyGEM MB (mwea)')
+                elif y_cn == 'nbinyrs_negmbclim':
+                    ax.set_ylabel('nbinyrs_negmbclim (-)')
+                elif y_cn == 'bin_thick_monthly':
+                    ax.set_ylabel('Ice Thickness (m)')
+                    t = s[0,-2]
+                    h = s[0,-1]
+                    ax.plot([],[],label=f'{np.round(h).astype(int)} m, month {int(t)}')
+                    ax.legend(handlelength=0, loc='upper right', borderaxespad=0, fancybox=False)
+                # plt.show()
+
+                f.tight_layout()
+                f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_{int(t)}_{np.round(h,2)}m.png')
+                plt.close()
     
-            modelprms_set = np.hstack((tbias_set, kp_set, ddf_set))
-            modelprms_set_norm = (modelprms_set - X_mean) / X_std
-    
-            y_set_norm = model(torch.tensor(modelprms_set_norm).to(torch.float)).mean.detach().numpy()
-            y_set = y_set_norm * y_std + y_mean
-    
-            f, ax = plt.subplots(1, 1, figsize=(4, 4))
-            # kp_1_idx = np.where(sim_dict['kp'] == 1)[0]
-            kp_1_idx = np.where(X[:,1] == 1)[0]
-            # ax.plot(sims_df.loc[kp_1_idx,'tbias'], sims_df.loc[kp_1_idx,y_cn])
-            ax.plot(X[kp_1_idx,0], y[kp_1_idx])
-            ax.plot(tbias_set,y_set,'.')
-            ax.set_xlabel('tbias (degC)')
-            if y_cn == 'mb_mwea':
-                ax.set_ylabel('PyGEM MB (mwea)')
-            elif y_cn == 'nbinyrs_negmbclim':
-                ax.set_ylabel('nbinyrs_negmbclim (-)')
-            plt.show()
-    
-            # Compare the modeled and emulated mass balances
+            # Compare the modeled and emulated mass balances for entire test set
             y_em_norm = model(torch.tensor(X_norm).to(torch.float)).mean.detach().numpy()
             y_em = y_em_norm * y_std + y_mean
     
             f, ax = plt.subplots(1, 1, figsize=(4, 4))
-            ax.plot(y,y_em,'.')
-            ax.plot([y.min(),y.max()], [y.min(), y.max()])
+            ax.plot(y, y_em, '.')
+            ax.plot([y.min(),y.max()], [y.min(), y.max()],c='k',lw=1)
             if y_cn == 'mb_mwea':
-                ax.set_xlabel('emulator MB (mwea)')
-                ax.set_ylabel('PyGEM MB (mwea)')
+                ax.set_ylabel('emulator MB (mwea)')
+                ax.set_xlabel('PyGEM MB (mwea)')
                 ax.set_xlim(-1,1)
                 ax.set_ylim(-1,1)
             elif y_cn == 'nbinyrs_negmbclim':
-                ax.set_xlabel('emulator nbinyrs_negmbclim (-)')
-                ax.set_ylabel('PyGEM nbinyrs_negmbclim (-)')
-            plt.show()
-            
+                ax.set_ylabel('emulator nbinyrs_negmbclim (-)')
+                ax.set_xlabel('PyGEM nbinyrs_negmbclim (-)')
+            elif y_cn == 'bin_thick_monthly':
+                ax.set_ylabel('emulator ice thickness (m)')
+                ax.set_xlabel('PyGEM ice thickness (m)')
+                f.tight_layout()
+                f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_v_model_thick.png')
+                # plt.show()
+                plt.close()
+
         # ----- EXPORT EMULATOR -----
         # Save emulator (model state, x_train, y_train, etc.)
         em_mod_fn = glacier_str + '-emulator-' + y_cn + '.pth'
@@ -1326,11 +1379,13 @@ def main(list_packed_vars):
                             bin_thick_monthly = bin_thick_monthly[nonzero_rows,:]
                             surf_h_init = surf_h_init[nonzero_rows]
 
-
                             # need to sparsify this emulator training data - could randonly select, or perhaps select from upper and lower 25th percentiles of glacier
                             # select random bins
                             # take 3 to 5 bins  (minimum, max, 25th, 75th, median) - test performance (3 v 5 v 10, etc)
-                            idxs_keep = [0,bin_thick_monthly.shape[0]//2,-1]
+                            med = index_closest(surf_h_init, np.percentile(surf_h_init,50))
+                            pct25 = index_closest(surf_h_init, np.percentile(surf_h_init,25))
+                            pct75 = index_closest(surf_h_init, np.percentile(surf_h_init,75))
+                            idxs_keep = [0,pct25,med,pct75,-1]    # min, med, max elevation bin
                             # idxs_keep = random.sample(np.arange(bin_thick_monthly.shape[0]).tolist(),bin_thick_monthly.shape[0]//10)
                             bin_thick_monthly = bin_thick_monthly[idxs_keep,:]
                             surf_h_init = surf_h_init[idxs_keep]
@@ -2050,7 +2105,5 @@ if __name__ == '__main__':
         # Loop through the chunks and export bias adjustments
         for n in range(len(list_packed_vars)):
             main(list_packed_vars[n])
-    
-
 
     print('Total processing time:', time.time()-time_start, 's')

@@ -85,7 +85,7 @@ if hindcast:
 
 #%% ===== CALIBRATION OPTIONS =====
 # Calibration option ('emulator', 'MCMC', 'MCMC_fullsim' 'HH2015', 'HH2015mod', None)
-option_calibration = 'grid_search'
+option_calibration = 'emulator'
 
 # Prior distribution (specify filename or set equal to None)
 priors_reg_fullfn = main_directory + '/../Output/calibration/priors_region.csv'
@@ -122,7 +122,7 @@ elif option_calibration == 'gradient_descent':
     opt_calib_monthly_thick = True # Option to calibrate monthly binned glacier thickness
 
 elif option_calibration == 'emulator':
-    emulator_sims = 50             # Number of simulations to develop the emulator
+    emulator_sims = 100             # Number of simulations to develop the emulator
     overwrite_em_sims = True       # Overwrite emulator simulations
     opt_calib_monthly_thick = True # Option to calibrate monthly binned glacier thickness
     opt_hh2015_mod = True           # Option to also perform the HH2015_mod calibration using the emulator
