@@ -389,7 +389,7 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
 
         if debug:
             print(f'Calibration x-parameters: {", ".join(X_cns)}')
-            print(f'Calibration y-parametes: {y_cn}')
+            print(f'Calibration y-parameters: {y_cn}')
             print(f'X:\n{X}')
             print(f'X-shape:\n{X.shape}\n')
             print(f'y:\n{y}')
@@ -429,15 +429,16 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
     
             if debug:
                 f, ax = plt.subplots(1, 1, figsize=(4, 4))
+                ax.axline((0, 0), slope=1, c='k')
                 ax.plot(y_test.numpy()[idx], y_pred.mean.numpy()[idx], 'k*')
                 ax.fill_between(y_test.numpy()[idx], lower.numpy()[idx], upper.numpy()[idx], alpha=0.5)
                 ax.set_xlabel('y_test')
                 ax.set_ylabel('y_pred')
                 ax.set_ylim([-3,3])
-                # plt.show()
                 f.tight_layout()
-                f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_prior_thick.png')
-                plt.close()
+                plt.show()
+                # f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_prior_thick.png')
+                # plt.close()
 
     
         # ----- Find optimal model hyperparameters -----
@@ -485,10 +486,10 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
                 ax.set_xlabel('y_test')
                 ax.set_ylabel('y_pred')
                 ax.set_ylim([-3,3])
-                # plt.show()
                 f.tight_layout()
-                f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_posterior_thick.png')
-                plt.close()
+                plt.show()
+                # f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_posterior_thick.png')
+                # plt.close()
 
     
         # if debug:
@@ -545,11 +546,11 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
                     h = s[0,-1]
                     ax.plot([],[],label=f'{np.round(h).astype(int)} m, month {int(t)}')
                     ax.legend(handlelength=0, loc='upper right', borderaxespad=0, fancybox=False)
-                # plt.show()
 
                 f.tight_layout()
-                f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_{int(t)}_{np.round(h,2)}m.png')
+                # f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_{int(t)}_{np.round(h,2)}m.png')
                 plt.close()
+                # plt.show()
     
             # Compare the modeled and emulated mass balances for entire test set
             y_em_norm = model(torch.tensor(X_norm).to(torch.float)).mean.detach().numpy()
@@ -570,9 +571,9 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
                 ax.set_ylabel('emulator ice thickness (m)')
                 ax.set_xlabel('PyGEM ice thickness (m)')
                 f.tight_layout()
-                f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_v_model_thick.png')
-                # plt.show()
-                plt.close()
+                # f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_v_model_thick.png')
+                plt.show()
+                # plt.close()
 
         # ----- EXPORT EMULATOR -----
         # Save emulator (model state, x_train, y_train, etc.)
@@ -1354,7 +1355,7 @@ def main(list_packed_vars):
 
                     # Run through random values
                     for nsim in range(pygem_prms.emulator_sims):
-                        print('iter ',nsim)
+                        print(f'iter {nsim} of {pygem_prms.emulator_sims}')
                         modelprms['tbias'] = tbias_random[nsim]
                         modelprms['kp'] = kp_random[nsim]
                         modelprms['ddfsnow'] = ddfsnow_random[nsim]

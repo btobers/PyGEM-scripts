@@ -122,7 +122,7 @@ elif option_calibration == 'gradient_descent':
     opt_calib_monthly_thick = True # Option to calibrate monthly binned glacier thickness
 
 elif option_calibration == 'emulator':
-    emulator_sims = 100             # Number of simulations to develop the emulator
+    emulator_sims = 500             # Number of simulations to develop the emulator
     overwrite_em_sims = True       # Overwrite emulator simulations
     opt_calib_monthly_thick = True # Option to calibrate monthly binned glacier thickness
     opt_hh2015_mod = True           # Option to also perform the HH2015_mod calibration using the emulator
