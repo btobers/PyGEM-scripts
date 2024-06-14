@@ -436,9 +436,8 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
                 ax.set_ylabel('y_pred')
                 ax.set_ylim([-3,3])
                 f.tight_layout()
-                plt.show()
-                # f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_prior_thick.png')
-                # plt.close()
+                f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_prior_thick.png')
+                plt.close()
 
     
         # ----- Find optimal model hyperparameters -----
@@ -487,9 +486,9 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
                 ax.set_ylabel('y_pred')
                 ax.set_ylim([-3,3])
                 f.tight_layout()
-                plt.show()
-                # f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_posterior_thick.png')
-                # plt.close()
+                # plt.show()
+                f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_posterior_thick.png')
+                plt.close()
 
     
         # if debug:
@@ -548,7 +547,7 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
                     ax.legend(handlelength=0, loc='upper right', borderaxespad=0, fancybox=False)
 
                 f.tight_layout()
-                # f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_{int(t)}_{np.round(h,2)}m.png')
+                f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_{int(t)}_{np.round(h,2)}m.png')
                 plt.close()
                 # plt.show()
     
@@ -571,9 +570,9 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
                 ax.set_ylabel('emulator ice thickness (m)')
                 ax.set_xlabel('PyGEM ice thickness (m)')
                 f.tight_layout()
-                # f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_v_model_thick.png')
-                plt.show()
-                # plt.close()
+                f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_v_model_thick.png')
+                # plt.show()
+                plt.close()
 
         # ----- EXPORT EMULATOR -----
         # Save emulator (model state, x_train, y_train, etc.)
@@ -1205,6 +1204,10 @@ def main(list_packed_vars):
                 tbias_init = pygem_prms.tbias_init
                 kp_init = pygem_prms.kp_init
                 ddfsnow_init = pygem_prms.ddfsnow_init
+                if pygem_prms.opt_calib_monthly_thick:
+                    y_cn = 'bin_thick_monthly'
+                else:
+                    y_cn = 'mb_mwea'
                 
                 # ----- Initialize model parameters -----
                 modelprms['tbias'] = tbias_init
@@ -1328,10 +1331,8 @@ def main(list_packed_vars):
                     if debug:    
                         print('ddfsnow random:', ddfsnow_random.mean(), ddfsnow_random.std(),'\n')
                     
-                    y_cn = 'mb_mwea'    # predefine emulator y-variable name
                     # Set up new simulation dictionary if running an emulator for monthly surface elevation change  # FIRST RUN SHOULD BE ON BOUNDS
                     if pygem_prms.opt_calib_monthly_thick:
-                        y_cn = 'bin_thick_monthly'
                         sims_dict = {} 
 
                         # get oib survey dates for glacier - we'll only emulate glacier thickness/mass balance at these time steps
@@ -1426,8 +1427,8 @@ def main(list_packed_vars):
                                   'ddfsnow:', np.round(modelprms['ddfsnow'],4), 'mb_mwea:', np.round(mb_mwea,3))
                     
                     # ----- Export results -----
-                    if pygem_prms.opt_calib_monthly_thick:
-                        sims_fn = sims_fn[:-5]+'_dzdt.json'
+                    # if pygem_prms.opt_calib_monthly_thick:
+                    #     sims_fn = sims_fn[:-5]+'_dzdt.json'
                     if os.path.exists(sims_fp) == False:
                         os.makedirs(sims_fp, exist_ok=True)
                     with open(sims_fp + sims_fn, 'w') as fp:
@@ -1439,7 +1440,7 @@ def main(list_packed_vars):
                         sims_dict = json.load(fp)
 
                 # ----- EMULATOR: Mass balance -----
-                em_mod_fn = glacier_str + '-emulator-mb_mwea.pth'
+                em_mod_fn = glacier_str + f'-emulator-{y_cn}.pth'
                 em_mod_fp = pygem_prms.emulator_fp + 'models/' + glacier_str.split('.')[0].zfill(2) + '/'
                 if not os.path.exists(em_mod_fp + em_mod_fn) or pygem_prms.overwrite_em_sims:
                     (X_train, X_mean, X_std, y_train, y_mean, y_std, likelihood, model) = (
