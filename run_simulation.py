@@ -373,8 +373,8 @@ def main(list_packed_vars):
         reg_str = str(glacier_rgi_table.O1Region).zfill(2)
         rgiid = main_glac_rgi.loc[main_glac_rgi.index.values[glac],'RGIId']
 
-        try:
-        # for batman in [0]:
+        # try:
+        for batman in [0]:
 
             # ===== Load glacier data: area (km2), ice thickness (m), width (km) =====
             if not glacier_rgi_table['TermType'] in [1,5] or not pygem_prms.include_calving:
@@ -1197,6 +1197,8 @@ def main(list_packed_vars):
 
                             for n_iter in range(sim_iters):
                                 # create and return xarray dataset
+                                modelprms_i = {key: modelprms_all[key][n_iter] for key in modelprms_all}
+                                output_binned.set_modelprms_dict(modelprms_i)
                                 output_binned.create_xr_ds()
                                 output_ds_binned_stats = output_binned.get_xr_ds()
                                 # fill values
@@ -1284,16 +1286,16 @@ def main(list_packed_vars):
                     
         # print('\n\nADD BACK IN EXCEPTION\n\n')
         
-        except Exception as err:
-            # LOG FAILURE
-            fail_fp = pygem_prms.output_sim_fp + 'failed/' + reg_str + '/' + gcm_name + '/'
-            if gcm_name not in ['ERA-Interim', 'ERA5', 'COAWST']:
-                fail_fp += scenario + '/'
-            if not os.path.exists(fail_fp):
-                os.makedirs(fail_fp, exist_ok=True)
-            txt_fn_fail = glacier_str + "-sim_failed.txt"
-            with open(fail_fp + txt_fn_fail, "w") as text_file:
-                text_file.write(glacier_str + f' failed to complete simulation: {err}')
+        # except Exception as err:
+        #     # LOG FAILURE
+        #     fail_fp = pygem_prms.output_sim_fp + 'failed/' + reg_str + '/' + gcm_name + '/'
+        #     if gcm_name not in ['ERA-Interim', 'ERA5', 'COAWST']:
+        #         fail_fp += scenario + '/'
+        #     if not os.path.exists(fail_fp):
+        #         os.makedirs(fail_fp, exist_ok=True)
+        #     txt_fn_fail = glacier_str + "-sim_failed.txt"
+        #     with open(fail_fp + txt_fn_fail, "w") as text_file:
+        #         text_file.write(glacier_str + f' failed to complete simulation: {err}')
 
     # Global variables for Spyder development
     if not args.option_parallels:

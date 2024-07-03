@@ -123,7 +123,7 @@ elif option_calibration == 'gradient_descent':
 
 elif option_calibration == 'emulator':
     emulator_sims = 50             # Number of simulations to develop the emulator
-    overwrite_em_sims = False       # Overwrite emulator simulations
+    overwrite_em_sims = True       # Overwrite emulator simulations
     opt_calib_monthly_thick = True # Option to calibrate monthly binned glacier thickness
     opt_hh2015_mod = True           # Option to also perform the HH2015_mod calibration using the emulator
     emulator_fp = output_filepath + 'emulator/'
@@ -223,7 +223,7 @@ icethickness_cal_frac_byarea = 0.9  # Regional glacier area fraction that is use
 
 #%% ===== SIMULATION AND GLACIER DYNAMICS OPTIONS =====
 # Glacier dynamics scheme (options: 'OGGM', 'MassRedistributionCurves', None)
-option_dynamics = None
+option_dynamics = 'OGGM'
 
 # Bias adjustment option (options: 0, 1, 2, 3) 
 #  0: no adjustment

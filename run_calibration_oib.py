@@ -520,35 +520,34 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
             else:
                 sets.append(np.hstack((tbias_set, kp_set, ddf_set)))
 
-            out = []
-            for i,s in enumerate(sets):
-                # normalize test set values
-                modelprms_set_norm = (s - X_mean) / X_std
+            # for i,s in enumerate(sets):
+            #     # normalize test set values
+            #     modelprms_set_norm = (s - X_mean) / X_std
         
-                y_set_norm = model(torch.tensor(modelprms_set_norm).to(torch.float)).mean.detach().numpy()
-                y_set = y_set_norm * y_std + y_mean
+            #     y_set_norm = model(torch.tensor(modelprms_set_norm).to(torch.float)).mean.detach().numpy()
+            #     y_set = y_set_norm * y_std + y_mean
         
-                f, ax = plt.subplots(1, 1, figsize=(4, 4))
-                # kp_1_idx = np.where(sim_dict['kp'] == 1)[0]
-                kp_1_idx = np.where(X[:,1] == 1)[0]
-                # ax.plot(sims_df.loc[kp_1_idx,'tbias'], sims_df.loc[kp_1_idx,y_cn])
-                ax.plot(X[kp_1_idx,0], y[kp_1_idx])
-                ax.plot(tbias_set,y_set,'.')
-                ax.set_xlabel('tbias (degC)')
-                if y_cn == 'mb_mwea':
-                    ax.set_ylabel('PyGEM MB (mwea)')
-                elif y_cn == 'nbinyrs_negmbclim':
-                    ax.set_ylabel('nbinyrs_negmbclim (-)')
-                elif y_cn == 'bin_thick_monthly':
-                    ax.set_ylabel('Ice Thickness (m)')
-                    t = s[0,-2]
-                    h = s[0,-1]
-                    ax.plot([],[],label=f'{np.round(h).astype(int)} m, month {int(t)}')
-                    ax.legend(handlelength=0, loc='upper right', borderaxespad=0, fancybox=False)
+            #     f, ax = plt.subplots(1, 1, figsize=(4, 4))
+            #     # kp_1_idx = np.where(sim_dict['kp'] == 1)[0]
+            #     kp_1_idx = np.where(X[:,1] == 1)[0]
+            #     # ax.plot(sims_df.loc[kp_1_idx,'tbias'], sims_df.loc[kp_1_idx,y_cn])
+            #     ax.plot(X[kp_1_idx,0], y[kp_1_idx])
+            #     ax.plot(tbias_set,y_set,'.')
+            #     ax.set_xlabel('tbias (degC)')
+            #     if y_cn == 'mb_mwea':
+            #         ax.set_ylabel('PyGEM MB (mwea)')
+            #     elif y_cn == 'nbinyrs_negmbclim':
+            #         ax.set_ylabel('nbinyrs_negmbclim (-)')
+            #     elif y_cn == 'bin_thick_monthly':
+            #         ax.set_ylabel('Ice Thickness (m)')
+            #         t = s[0,-2]
+            #         h = s[0,-1]
+            #         ax.plot([],[],label=f'{np.round(h).astype(int)} m, month {int(t)}')
+            #         ax.legend(handlelength=0, loc='upper right', borderaxespad=0, fancybox=False)
 
-                f.tight_layout()
-                f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_{int(t)}_{np.round(h,2)}m.png')
-                plt.close()
+            #     f.tight_layout()
+            #     f.savefig(f'{em_mod_fp}/{glacier_str}_emulator_{int(t)}_{np.round(h,2)}m.png')
+            #     plt.close()
                 # plt.show()
     
             # Compare the modeled and emulated mass balances for entire test set
@@ -1384,10 +1383,11 @@ def main(list_packed_vars):
                             # need to sparsify this emulator training data - could randonly select, or perhaps select from upper and lower 25th percentiles of glacier
                             # select random bins
                             # take 3 to 5 bins  (minimum, max, 25th, 75th, median) - test performance (3 v 5 v 10, etc)
-                            med = index_closest(surf_h_init, np.percentile(surf_h_init,50))
-                            pct25 = index_closest(surf_h_init, np.percentile(surf_h_init,25))
-                            pct75 = index_closest(surf_h_init, np.percentile(surf_h_init,75))
-                            idxs_keep = [0,pct25,med,pct75,-1]    # min, med, max elevation bin
+                            idxs_keep = [index_closest(surf_h_init, np.percentile([np.min(surf_h_init),np.max(surf_h_init)], val)) for val in [0, 25, 50, 75, 100]]
+
+                            # randomly sample elevation bins and see how emulator performs
+                            idxs_keep = random.sample(np.arange(len(surf_h_init)).tolist(), 5)
+                            
                             # idxs_keep = random.sample(np.arange(bin_thick_monthly.shape[0]).tolist(),bin_thick_monthly.shape[0]//10)
                             bin_thick_monthly = bin_thick_monthly[idxs_keep,:]
                             surf_h_init = surf_h_init[idxs_keep]
@@ -1425,7 +1425,7 @@ def main(list_packed_vars):
                         if debug and nsim%500 == 0:
                             print(nsim, 'tbias:', np.round(modelprms['tbias'],2), 'kp:', np.round(modelprms['kp'],2),
                                   'ddfsnow:', np.round(modelprms['ddfsnow'],4), 'mb_mwea:', np.round(mb_mwea,3))
-                    
+
                     # ----- Export results -----
                     # if pygem_prms.opt_calib_monthly_thick:
                     #     sims_fn = sims_fn[:-5]+'_dzdt.json'
