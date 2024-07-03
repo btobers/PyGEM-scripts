@@ -17,12 +17,7 @@ from scipy.optimize import minimize
 from scipy import stats
 #import xarray as xr
 
-# Local libraries
-try:
-    import pygem
-except:
-    print('---------\nPyGEM DEV\n---------')
-    sys.path.append(os.getcwd() + '/../PyGEM/')
+import pygem
 import pygem_input as pygem_prms
 from pygem import class_climate
 from pygem.massbalance import PyGEMMassBalance
@@ -60,20 +55,16 @@ def getparser():
         reference gcm name
     num_simultaneous_processes (optional) : int
         number of cores to use in parallels
-    option_parallels (optional) : int
-        switch to use parallels or not
     rgi_glac_number_fn : str
         filename of .pkl file containing a list of glacier numbers which is used to run batches on the supercomputer
     rgi_glac_number : str
         rgi glacier number to run for supercomputer
-    option_ordered : int
-        option to keep glaciers ordered or to grab every n value for the batch
-        (the latter helps make sure run times on each core are similar as it removes any timing differences caused by
-         regional variations)
-    progress_bar : int
-        Switch for turning the progress bar on or off (default = 0 (off))
-    debug : int
-        Switch for turning debug printing on or off (default = 0 (off))
+    option_calibration : str
+        calibration method (default taken from pygem_input file)
+    progress_bar : bool
+        Switch for turning the progress bar on or off (default = False)
+    debug : bool
+        Switch for turning debug printing on or off (default = False)
 
     Returns
     -------
@@ -83,22 +74,19 @@ def getparser():
     # add arguments
     parser.add_argument('-ref_gcm_name', action='store', type=str, default=pygem_prms.ref_gcm_name,
                         help='reference gcm name')
-    parser.add_argument('-num_simultaneous_processes', action='store', type=int, default=4,
-                        help='number of simultaneous processes (cores) to use')
-    parser.add_argument('-option_parallels', action='store', type=int, default=1,
-                        help='Switch to use or not use parallels (1 - use parallels, 0 - do not)')
     parser.add_argument('-rgi_glac_number_fn', action='store', type=str, default=None,
                         help='Filename containing list of rgi_glac_number, helpful for running batches on spc')
-    parser.add_argument('-option_ordered', action='store', type=int, default=1,
-                        help='switch to keep lists ordered or not')
-    parser.add_argument('-progress_bar', action='store', type=int, default=0,
-                        help='Boolean for the progress bar to turn it on or off (default 0 is off)')
-    parser.add_argument('-debug', action='store', type=int, default=0,
-                        help='Boolean for debugging to turn it on or off (default 0 is off)')
     parser.add_argument('-rgi_glac_number', action='store', type=str, default=None,
                         help='rgi glacier number for supercomputer')
     parser.add_argument('-option_calibration', action='store', type=str, default=pygem_prms.option_calibration,
                         help='calibration option')
+    parser.add_argument('-num_simultaneous_processes', action='store', type=int, default=1,
+                        help='number of simultaneous processes (cores) to use (default is 1, ie. no parallelization)')
+    # flags
+    parser.add_argument('-progress_bar', action='store_true',
+                        help='Flag to show progress bar')
+    parser.add_argument('-debug', action='store_true',
+                        help='Flag for debugging')
     return parser
 
 
@@ -150,7 +138,7 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
         def __init__(self, train_x, train_y, likelihood):
             super(ExactGPModel, self).__init__(train_x, train_y, likelihood)
             self.mean_module = gpytorch.means.ConstantMean()
-            self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=3))
+            self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
     
         def forward(self, x):
             mean_x = self.mean_module(x)
@@ -161,15 +149,47 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
     def create_emulator(glacier_str, sims_df, y_cn, 
                         X_cns=['tbias','kp','ddfsnow'], 
                         em_fp=pygem_prms.output_filepath + 'emulator/', debug=False):
-        
+        """
+        create emulator for calibrating PyGEM model parameters
+
+        Parameters
+        ----------
+        glacier_str : str
+            glacier RGIId string
+        sims_dict : Dictionary
+            parameter distributions for each emulator simulation
+        y_cn : str
+            variable name in sims_dict which to fit parameter sets to fit
+        X_cns : list
+            PyGEM model parameters to calibrate
+        em_fp : str
+            filepath to save emulator results
+
+        Returns
+        -------
+        X_train, X_mean, X_std, y_train, y_mean, y_std, likelihood, model
+        """
         # This is required for the supercomputer such that resources aren't stolen from other cpus
         torch.set_num_threads(1)
         
         assert y_cn in sims_df.columns, 'emulator error: y_cn not in sims_df'
+
+        ##################        
+        ### get X data ###
+        ##################
         
         X = sims_df.loc[:,X_cns].values
         y = sims_df[y_cn].values
     
+        if debug:
+            print(f'Calibration x-parameters: {", ".join(X_cns)}')
+            print(f'Calibration y-parametes: {y_cn}')
+            print(f'X:\n{X}')
+            print(f'X-shape:\n{X.shape}\n')
+            print(f'y:\n{y}')
+            print(f'y-shape:\n{y.shape}')
+
+        ##################
         # Normalize data
         X_mean = X.mean(axis=0)
         X_std = X.std(axis=0)
@@ -189,8 +209,6 @@ if pygem_prms.option_calibration in ['MCMC', 'emulator']:
         # initialize likelihood and model
         likelihood = gpytorch.likelihoods.GaussianLikelihood()
         model = ExactGPModel(X_train, y_train, likelihood)
-        
-        
     
         # Plot test set predictions prior to training
         # Get into evaluation (predictive posterior) mode
@@ -334,11 +352,7 @@ def main(list_packed_vars):
     
     parser = getparser()
     args = parser.parse_args()
-
-    if args.debug == 1:
-        debug = True
-    else:
-        debug = False
+    debug = args.debug
 
     # ===== LOAD GLACIERS =====
     main_glac_rgi = modelsetup.selectglaciersrgitable(glac_no=glac_no)
@@ -2539,7 +2553,7 @@ def main(list_packed_vars):
                 text_file.write(glacier_str + ' had no flowlines or mb_data.')
 
     # Global variables for Spyder development
-    if args.option_parallels == 0:
+    if args.num_simultaneous_processes == 1:
         global main_vars
         main_vars = inspect.currentframe().f_locals
 
@@ -2549,11 +2563,6 @@ if __name__ == '__main__':
     time_start = time.time()
     parser = getparser()
     args = parser.parse_args()
-
-    if args.debug == 1:
-        debug = True
-    else:
-        debug = False
 
 #    cfg.initialize()
 #    cfg.PARAMS['use_multiprocessing']  = False
@@ -2575,7 +2584,7 @@ if __name__ == '__main__':
         glac_no = list(main_glac_rgi_all['rgino_str'].values)
 
     # Number of cores for parallel processing
-    if args.option_parallels != 0:
+    if args.num_simultaneous_processes > 1:
         num_cores = int(np.min([len(glac_no), args.num_simultaneous_processes]))
     else:
         num_cores = 1
@@ -2593,9 +2602,9 @@ if __name__ == '__main__':
         list_packed_vars.append([count, glac_no_lst, gcm_name])
 
     # Parallel processing
-    if args.option_parallels != 0:
-        print('Processing in parallel with ' + str(args.num_simultaneous_processes) + ' cores...')
-        with multiprocessing.Pool(args.num_simultaneous_processes) as p:
+    if num_cores > 1:
+        print('Processing in parallel with ' + str(num_cores) + ' cores...')
+        with multiprocessing.Pool(num_cores) as p:
             p.map(main,list_packed_vars)
     # If not in parallel, then only should be one loop
     else:
