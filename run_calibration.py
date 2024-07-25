@@ -1609,12 +1609,10 @@ def main(list_packed_vars):
                         modelprms['ddfsnow'] = ddfsnow_start
                         
                         # check starting mass balance is not less than the maximum mass loss
-    #                    mb_mwea_start = run_emulator_mb(modelprms)
                         mb_mwea_start = mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=fls)
                         tbias_step = 0.1
                         while mb_mwea_start < mb_max_loss:
                             modelprms['tbias'] = modelprms['tbias'] - tbias_step
-    #                        mb_mwea_start = run_emulator_mb(modelprms)
                             mb_mwea_start = mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=fls)
                             
                             print('tbias:', modelprms['tbias'], mb_mwea_start)
@@ -1625,7 +1623,6 @@ def main(list_packed_vars):
                         while mb_total_minelev_start > 0 and mb_mwea_start > mb_max_loss:
                             modelprms['tbias'] = modelprms['tbias'] + tbias_smallstep
                             mb_total_minelev_start = calc_mb_total_minelev(modelprms)
-    #                        mb_mwea_start = run_emulator_mb(modelprms)
                             mb_mwea_start = mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=fls)
                             
     #                        print('tbias:', modelprms['tbias'], mb_mwea_start, mb_total_minelev_start)
