@@ -5,11 +5,7 @@ import os, sys
 from datetime import datetime
 # External libraries
 import numpy as np
-# Local libaries
-try:
-    import pygem
-except:
-    sys.path.append(os.getcwd() + '/../PyGEM/')
+import pygem
 from pygem.utils._funcs_selectglaciers import get_same_glaciers, glac_num_fromrange, glac_fromcsv, glac_wo_cal
 
 
@@ -19,6 +15,7 @@ user_info = {'name':'Brandon Tober',
             'email':'btober@cmu.edu'}
 main_directory = os.getcwd()
 # main_directory = '/trace/group/rounce/shared/Output/'      # file path hack if data is in different location from code
+main_directory = '/Users/btober/Documents/pygem_data/Output/'      # file path hack if data is in different location from code
 # Output directory
 output_filepath = main_directory + '/../Output/'
 
@@ -84,7 +81,7 @@ if hindcast:
 
 #%% ===== CALIBRATION OPTIONS =====
 # Calibration option ('emulator', 'MCMC', 'MCMC_fullsim' 'HH2015', 'HH2015mod', None)
-option_calibration = 'HH2015'
+option_calibration = 'MCMC'
 
 # Prior distribution (specify filename or set equal to None)
 priors_reg_fullfn = main_directory + '/../Output/calibration/priors_region.csv'
