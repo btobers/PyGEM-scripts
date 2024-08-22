@@ -153,7 +153,7 @@ elif option_calibration in ['MCMC', 'MCMC_fullsim']:
     mcmc_sample_no = 10000         # number of steps (10000 was found to be sufficient in HMA)
     mcmc_burn_no = 200              # number of steps to burn-in (0 records all steps in chain)
 #    mcmc_sample_no = 100          # number of steps (10000 was found to be sufficient in HMA)
-#    mcmc_burn_no = 0              # number of steps to burn-in (0 records all steps in chain)
+    mcmc_burn_pct = 2               # percentage of steps to burn-in (0 records all steps in chain)
     mcmc_step = None                # step option (None or 'am')
     thin_interval = 10              # thin interval if need to reduce file size (best to leave at 1 if space allows)
     # Degree-day factor of snow distribution options

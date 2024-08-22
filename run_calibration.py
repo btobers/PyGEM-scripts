@@ -16,6 +16,7 @@ from scipy.optimize import minimize
 from scipy import stats
 import pygem
 import pygem_input as pygem_prms
+import mcmc
 from pygem import class_climate
 from pygem.massbalance import PyGEMMassBalance
 #from pygem.glacierdynamics import MassRedistributionCurveModel
@@ -1042,300 +1043,309 @@ def main(list_packed_vars):
             # distributions, and output these sets of parameters and their corresponding mass balances to be
             # used in the simulations.
             elif pygem_prms.option_calibration == 'MCMC':
-                # ===== Define functions needed for MCMC method =====
-                def run_MCMC(gdir,
-                            kp_disttype=pygem_prms.kp_disttype,
-                            kp_gamma_alpha=None, kp_gamma_beta=None,
-                            kp_lognorm_mu=None, kp_lognorm_tau=None,
-                            kp_mu=None, kp_sigma=None, kp_bndlow=None, kp_bndhigh=None,
-                            kp_start=None,
-                            tbias_disttype=pygem_prms.tbias_disttype,
-                            tbias_mu=None, tbias_sigma=None, tbias_bndlow=None, tbias_bndhigh=None,
-                            tbias_start=None,
-                            ddfsnow_disttype=pygem_prms.ddfsnow_disttype,
-                            ddfsnow_mu=pygem_prms.ddfsnow_mu, ddfsnow_sigma=pygem_prms.ddfsnow_sigma,
-                            ddfsnow_bndlow=pygem_prms.ddfsnow_bndlow, ddfsnow_bndhigh=pygem_prms.ddfsnow_bndhigh,
-                            ddfsnow_start=pygem_prms.ddfsnow_start,
-                            iterations=10, mcmc_burn_no=pygem_prms.mcmc_burn_no, thin=pygem_prms.thin_interval, 
-                            tune_interval=1000, step=None, tune_throughout=True, save_interval=None, 
-                            burn_till_tuned=False, stop_tuning_after=5,
-                            verbose=0, progress_bar=args.progress_bar, dbname=None,
-                            use_potentials=True, mb_max_loss=None):
-                    """
-                    Runs the MCMC algorithm.
-                    Runs the MCMC algorithm by setting the prior distributions and calibrating the probability
-                    distributions of three model parameters for the mass balance function.
-                    Parameters
-                    ----------
-                    kp_disttype : str
-                        Distribution type of precipitation factor (either 'lognormal', 'uniform', or 'custom')
-                    kp_lognorm_mu, kp_lognorm_tau : float
-                        Lognormal mean and tau (1/variance) of precipitation factor
-                    kp_mu, kp_sigma, kp_bndlow, kp_bndhigh, kp_start : float
-                        Mean, stdev, lower bound, upper bound, and start value of precipitation factor
-                    tbias_disttype : str
-                        Distribution type of tbias (either 'truncnormal' or 'uniform')
-                    tbias_mu, tbias_sigma, tbias_bndlow, tbias_bndhigh, tbias_start : float
-                        Mean, stdev, lower bound, upper bound, and start value of temperature bias
-                    ddfsnow_disttype : str
-                        Distribution type of degree day factor of snow (either 'truncnormal' or 'uniform')
-                    ddfsnow_mu, ddfsnow_sigma, ddfsnow_bndlow, ddfsnow_bndhigh, ddfsnow_start : float
-                        Mean, stdev, lower bound, upper bound, and start value of degree day factor of snow
-                    iterations : int
-                        Total number of iterations to do (default 10).
-                    mcmc_burn_no : int
-                        Variables will not be tallied until this many iterations are complete (default 0).
-                    thin : int
-                        Variables will be tallied at intervals of this many iterations (default 1).
-                    tune_interval : int
-                        Step methods will be tuned at intervals of this many iterations (default 1000).
-                    step : str
-                        Choice of step method to use (default metropolis-hastings).
-                    tune_throughout : boolean
-                        If true, tuning will continue after the burnin period; otherwise tuning will halt at the end of
-                        the burnin period (default True).
-                    save_interval : int or None
-                        If given, the model state will be saved at intervals of this many iterations (default None).
-                    burn_till_tuned: boolean
-                        If True the Sampler will burn samples until all step methods are tuned. A tuned step methods is
-                        one that was not tuned for the last `stop_tuning_after` tuning intervals. The burn-in phase will
-                        have a minimum of 'burn' iterations but could be longer if tuning is needed. After the phase is
-                        done the sampler will run for another (iter - burn) iterations, and will tally the samples
-                        according to the 'thin' argument. This means that the total number of iteration is updated
-                        throughout the sampling procedure.  If True, it also overrides the tune_thorughout argument, so
-                        no step method will be tuned when sample are being tallied (default False).
-                    stop_tuning_after: int
-                        The number of untuned successive tuning interval needed to be reached in order for the burn-in
-                        phase to be done (if burn_till_tuned is True) (default 5).
-                    verbose : int
-                        An integer controlling the verbosity of the models output for debugging (default 0).
-                    progress_bar : boolean
-                        Display progress bar while sampling (default True).
-                    dbname : str
-                        Choice of database name the sample should be saved to (default None).
-                    use_potentials : Boolean
-                        Boolean to use of potential functions to further constrain likelihood functionns
-                    mb_max_loss : float
-                        Mass balance [mwea] at which the glacier completely melts
-                    Returns
-                    -------
-                    pymc.MCMC.MCMC
-                        Returns a model that contains sample traces of tbias, ddfsnow, kp and massbalance. These
-                        samples can be accessed by calling the trace attribute. For example:
-                            model.trace('ddfsnow')[:]
-                        gives the trace of ddfsnow values.
-                        A trace, or Markov Chain, is an array of values outputed by the MCMC simulation which defines
-                        the posterior probability distribution of the variable at hand.
-                    """
+                # load emulator
+                em_mod_fn = glacier_str + '-emulator-mb_mwea.pth'
+                em_mod_fp = pygem_prms.emulator_fp + 'models/' + glacier_str.split('.')[0].zfill(2) + '/'
+                if not os.path.exists(em_mod_fp + em_mod_fn):
+                    mbEmulator = create_emulator(glacier_str, sims_df, y_cn='mb_mwea')
+                else:
+                    mbEmulator = massbalEmulator.load(em_mod_path = em_mod_fp + em_mod_fn)
+
+#                 # ===== Define functions needed for MCMC method =====
+#                 def run_MCMC(gdir,
+#                             kp_disttype=pygem_prms.kp_disttype,
+#                             kp_gamma_alpha=None, kp_gamma_beta=None,
+#                             kp_lognorm_mu=None, kp_lognorm_tau=None,
+#                             kp_mu=None, kp_sigma=None, kp_bndlow=None, kp_bndhigh=None,
+#                             kp_start=None,
+#                             tbias_disttype=pygem_prms.tbias_disttype,
+#                             tbias_mu=None, tbias_sigma=None, tbias_bndlow=None, tbias_bndhigh=None,
+#                             tbias_start=None,
+#                             ddfsnow_disttype=pygem_prms.ddfsnow_disttype,
+#                             ddfsnow_mu=pygem_prms.ddfsnow_mu, ddfsnow_sigma=pygem_prms.ddfsnow_sigma,
+#                             ddfsnow_bndlow=pygem_prms.ddfsnow_bndlow, ddfsnow_bndhigh=pygem_prms.ddfsnow_bndhigh,
+#                             ddfsnow_start=pygem_prms.ddfsnow_start,
+#                             iterations=10, mcmc_burn_no=pygem_prms.mcmc_burn_no, thin=pygem_prms.thin_interval, 
+#                             tune_interval=1000, step=None, tune_throughout=True, save_interval=None, 
+#                             burn_till_tuned=False, stop_tuning_after=5,
+#                             verbose=0, progress_bar=args.progress_bar, dbname=None,
+#                             use_potentials=True, mb_max_loss=None):
+#                     """
+#                     Runs the MCMC algorithm.
+#                     Runs the MCMC algorithm by setting the prior distributions and calibrating the probability
+#                     distributions of three model parameters for the mass balance function.
+#                     Parameters
+#                     ----------
+#                     kp_disttype : str
+#                         Distribution type of precipitation factor (either 'lognormal', 'uniform', or 'custom')
+#                     kp_lognorm_mu, kp_lognorm_tau : float
+#                         Lognormal mean and tau (1/variance) of precipitation factor
+#                     kp_mu, kp_sigma, kp_bndlow, kp_bndhigh, kp_start : float
+#                         Mean, stdev, lower bound, upper bound, and start value of precipitation factor
+#                     tbias_disttype : str
+#                         Distribution type of tbias (either 'truncnormal' or 'uniform')
+#                     tbias_mu, tbias_sigma, tbias_bndlow, tbias_bndhigh, tbias_start : float
+#                         Mean, stdev, lower bound, upper bound, and start value of temperature bias
+#                     ddfsnow_disttype : str
+#                         Distribution type of degree day factor of snow (either 'truncnormal' or 'uniform')
+#                     ddfsnow_mu, ddfsnow_sigma, ddfsnow_bndlow, ddfsnow_bndhigh, ddfsnow_start : float
+#                         Mean, stdev, lower bound, upper bound, and start value of degree day factor of snow
+#                     iterations : int
+#                         Total number of iterations to do (default 10).
+#                     mcmc_burn_no : int
+#                         Variables will not be tallied until this many iterations are complete (default 0).
+#                     thin : int
+#                         Variables will be tallied at intervals of this many iterations (default 1).
+#                     tune_interval : int
+#                         Step methods will be tuned at intervals of this many iterations (default 1000).
+#                     step : str
+#                         Choice of step method to use (default metropolis-hastings).
+#                     tune_throughout : boolean
+#                         If true, tuning will continue after the burnin period; otherwise tuning will halt at the end of
+#                         the burnin period (default True).
+#                     save_interval : int or None
+#                         If given, the model state will be saved at intervals of this many iterations (default None).
+#                     burn_till_tuned: boolean
+#                         If True the Sampler will burn samples until all step methods are tuned. A tuned step methods is
+#                         one that was not tuned for the last `stop_tuning_after` tuning intervals. The burn-in phase will
+#                         have a minimum of 'burn' iterations but could be longer if tuning is needed. After the phase is
+#                         done the sampler will run for another (iter - burn) iterations, and will tally the samples
+#                         according to the 'thin' argument. This means that the total number of iteration is updated
+#                         throughout the sampling procedure.  If True, it also overrides the tune_thorughout argument, so
+#                         no step method will be tuned when sample are being tallied (default False).
+#                     stop_tuning_after: int
+#                         The number of untuned successive tuning interval needed to be reached in order for the burn-in
+#                         phase to be done (if burn_till_tuned is True) (default 5).
+#                     verbose : int
+#                         An integer controlling the verbosity of the models output for debugging (default 0).
+#                     progress_bar : boolean
+#                         Display progress bar while sampling (default True).
+#                     dbname : str
+#                         Choice of database name the sample should be saved to (default None).
+#                     use_potentials : Boolean
+#                         Boolean to use of potential functions to further constrain likelihood functionns
+#                     mb_max_loss : float
+#                         Mass balance [mwea] at which the glacier completely melts
+#                     Returns
+#                     -------
+#                     pymc.MCMC.MCMC
+#                         Returns a model that contains sample traces of tbias, ddfsnow, kp and massbalance. These
+#                         samples can be accessed by calling the trace attribute. For example:
+#                             model.trace('ddfsnow')[:]
+#                         gives the trace of ddfsnow values.
+#                         A trace, or Markov Chain, is an array of values outputed by the MCMC simulation which defines
+#                         the posterior probability distribution of the variable at hand.
+#                     """
                     
-                    # ===== EMULATORS FOR FAST PROCESSING =====
-                    em_mod_fn = glacier_str + '-emulator-mb_mwea.pth'
-                    em_mod_fp = pygem_prms.emulator_fp + 'models/' + glacier_str.split('.')[0].zfill(2) + '/'
-                    if not os.path.exists(em_mod_fp + em_mod_fn):
-                        mbEmulator = create_emulator(glacier_str, sims_df, y_cn='mb_mwea')
-                    else:
-                        mbEmulator = massbalEmulator.load(em_mod_path = em_mod_fp + em_mod_fn)
+#                     # ===== EMULATORS FOR FAST PROCESSING =====
+#                     em_mod_fn = glacier_str + '-emulator-mb_mwea.pth'
+#                     em_mod_fp = pygem_prms.emulator_fp + 'models/' + glacier_str.split('.')[0].zfill(2) + '/'
+#                     if not os.path.exists(em_mod_fp + em_mod_fn):
+#                         mbEmulator = create_emulator(glacier_str, sims_df, y_cn='mb_mwea')
+#                     else:
+#                         mbEmulator = massbalEmulator.load(em_mod_path = em_mod_fp + em_mod_fn)
                     
                       
-                    # Rough estimate of minimum elevation mass balance function
-                    def calc_mb_total_minelev(modelprms):
-                        """ Approximate estimate of the mass balance at minimum elevation """
-                        fl = fls[0]
-                        min_elev = fl.surface_h.min()
-                        glacier_gcm_temp = gdir.historical_climate['temp']
-                        glacier_gcm_prec = gdir.historical_climate['prec']
-                        glacier_gcm_lr = gdir.historical_climate['lr']
-                        glacier_gcm_elev = gdir.historical_climate['elev']
-                        # Temperature using gcm and glacier lapse rates
-                        #  T_bin = T_gcm + lr_gcm * (z_ref - z_gcm) + lr_glac * (z_bin - z_ref) + tempchange
-                        T_minelev = (glacier_gcm_temp + glacier_gcm_lr *
-                                    (glacier_rgi_table.loc[pygem_prms.option_elev_ref_downscale] - glacier_gcm_elev) +
-                                    glacier_gcm_lr * 
-                                    (min_elev - glacier_rgi_table.loc[pygem_prms.option_elev_ref_downscale]) +
-                                    modelprms['tbias'])
-                        # Precipitation using precipitation factor and precipitation gradient
-                        #  P_bin = P_gcm * prec_factor * (1 + prec_grad * (z_bin - z_ref))
-                        P_minelev = (glacier_gcm_prec * modelprms['kp'] * (1 + modelprms['precgrad'] * (min_elev -
-                                    glacier_rgi_table.loc[pygem_prms.option_elev_ref_downscale])))
-                        # Accumulation using tsnow_threshold
-                        Acc_minelev = np.zeros(P_minelev.shape)
-                        Acc_minelev[T_minelev <= modelprms['tsnow_threshold']] = (
-                                P_minelev[T_minelev <= modelprms['tsnow_threshold']])
-                        # Melt
-                        # energy available for melt [degC day]
-                        melt_energy_available = T_minelev * dates_table['daysinmonth'].values
-                        melt_energy_available[melt_energy_available < 0] = 0
-                        # assume all snow melt because anything more would melt underlying ice in lowermost bin
-                        # SNOW MELT [m w.e.]
-                        Melt_minelev = modelprms['ddfsnow'] * melt_energy_available
-                        # Total mass balance over entire period at minimum elvation
-                        mb_total_minelev = (Acc_minelev - Melt_minelev).sum()
+#                     # Rough estimate of minimum elevation mass balance function
+#                     def calc_mb_total_minelev(modelprms):
+#                         """ Approximate estimate of the mass balance at minimum elevation """
+#                         fl = fls[0]
+#                         min_elev = fl.surface_h.min()
+#                         glacier_gcm_temp = gdir.historical_climate['temp']
+#                         glacier_gcm_prec = gdir.historical_climate['prec']
+#                         glacier_gcm_lr = gdir.historical_climate['lr']
+#                         glacier_gcm_elev = gdir.historical_climate['elev']
+#                         # Temperature using gcm and glacier lapse rates
+#                         #  T_bin = T_gcm + lr_gcm * (z_ref - z_gcm) + lr_glac * (z_bin - z_ref) + tempchange
+#                         T_minelev = (glacier_gcm_temp + glacier_gcm_lr *
+#                                     (glacier_rgi_table.loc[pygem_prms.option_elev_ref_downscale] - glacier_gcm_elev) +
+#                                     glacier_gcm_lr * 
+#                                     (min_elev - glacier_rgi_table.loc[pygem_prms.option_elev_ref_downscale]) +
+#                                     modelprms['tbias'])
+#                         # Precipitation using precipitation factor and precipitation gradient
+#                         #  P_bin = P_gcm * prec_factor * (1 + prec_grad * (z_bin - z_ref))
+#                         P_minelev = (glacier_gcm_prec * modelprms['kp'] * (1 + modelprms['precgrad'] * (min_elev -
+#                                     glacier_rgi_table.loc[pygem_prms.option_elev_ref_downscale])))
+#                         # Accumulation using tsnow_threshold
+#                         Acc_minelev = np.zeros(P_minelev.shape)
+#                         Acc_minelev[T_minelev <= modelprms['tsnow_threshold']] = (
+#                                 P_minelev[T_minelev <= modelprms['tsnow_threshold']])
+#                         # Melt
+#                         # energy available for melt [degC day]
+#                         melt_energy_available = T_minelev * dates_table['daysinmonth'].values
+#                         melt_energy_available[melt_energy_available < 0] = 0
+#                         # assume all snow melt because anything more would melt underlying ice in lowermost bin
+#                         # SNOW MELT [m w.e.]
+#                         Melt_minelev = modelprms['ddfsnow'] * melt_energy_available
+#                         # Total mass balance over entire period at minimum elvation
+#                         mb_total_minelev = (Acc_minelev - Melt_minelev).sum()
                     
-                        return mb_total_minelev
+#                         return mb_total_minelev
                     
-                    # ===== CHECK STARTING CONDITIONS (adjust tbias as needed) =====
-                    # Test initial model parameters provide good starting condition
-                    modelprms['kp'] = kp_start
-                    modelprms['tbias'] = tbias_start
-                    modelprms['ddfsnow'] = ddfsnow_start
+#                     # ===== CHECK STARTING CONDITIONS (adjust tbias as needed) =====
+#                     # Test initial model parameters provide good starting condition
+#                     modelprms['kp'] = kp_start
+#                     modelprms['tbias'] = tbias_start
+#                     modelprms['ddfsnow'] = ddfsnow_start
                     
-                    # check starting mass balance is not less than the maximum mass loss
-                    mb_mwea_start = mbEmulator.eval([modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow']])
-                    tbias_step = 0.1
-                    while mb_mwea_start < mb_max_loss:
-                        modelprms['tbias'] = modelprms['tbias'] - tbias_step
-                        mb_mwea_start = mbEmulator.eval([modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow']])
+#                     # check starting mass balance is not less than the maximum mass loss
+#                     mb_mwea_start = mbEmulator.eval([modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow']])
+#                     tbias_step = 0.1
+#                     while mb_mwea_start < mb_max_loss:
+#                         modelprms['tbias'] = modelprms['tbias'] - tbias_step
+#                         mb_mwea_start = mbEmulator.eval([modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow']])
                         
-#                        print('tbias:', modelprms['tbias'], mb_mwea_start)
+# #                        print('tbias:', modelprms['tbias'], mb_mwea_start)
                         
-                    # check melting occurs for starting conditions
-                    mb_total_minelev_start = calc_mb_total_minelev(modelprms)
-                    tbias_smallstep = 0.01
-                    while mb_total_minelev_start > 0 and mb_mwea_start > mb_max_loss:
-                        modelprms['tbias'] = modelprms['tbias'] + tbias_smallstep
-                        mb_total_minelev_start = calc_mb_total_minelev(modelprms)
-                        mb_mwea_start = mbEmulator.eval([modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow']])
+#                     # check melting occurs for starting conditions
+#                     mb_total_minelev_start = calc_mb_total_minelev(modelprms)
+#                     tbias_smallstep = 0.01
+#                     while mb_total_minelev_start > 0 and mb_mwea_start > mb_max_loss:
+#                         modelprms['tbias'] = modelprms['tbias'] + tbias_smallstep
+#                         mb_total_minelev_start = calc_mb_total_minelev(modelprms)
+#                         mb_mwea_start = mbEmulator.eval([modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow']])
                         
-#                        print('tbias:', modelprms['tbias'], mb_mwea_start, mb_total_minelev_start)
+# #                        print('tbias:', modelprms['tbias'], mb_mwea_start, mb_total_minelev_start)
                     
-                    tbias_start = modelprms['tbias']
+#                     tbias_start = modelprms['tbias']
                     
-                    # ===== PRIOR DISTRIBUTIONS =====
-                    # Priors dict to record values for export
-                    priors_dict = {}
-                    priors_dict['kp_disttype'] = kp_disttype
-                    priors_dict['tbias_disttype'] = tbias_disttype
-                    priors_dict['ddfsnow_disttype'] = ddfsnow_disttype
-                    # Precipitation factor [-]
-                    if kp_disttype == 'gamma':
-                        kp = pymc.Gamma('kp', alpha=kp_gamma_alpha, beta=kp_gamma_beta, value=kp_start)
-                        priors_dict['kp_gamma_alpha'] = kp_gamma_alpha
-                        priors_dict['kp_gamma_beta'] = kp_gamma_beta
-                    elif kp_disttype =='lognormal':
-                        #  lognormal distribution (roughly 0.3 to 3)
-                        kp_start = np.exp(kp_start)
-                        kp = pymc.Lognormal('kp', mu=kp_lognorm_mu, tau=kp_lognorm_tau, value=kp_start)
-                        priors_dict['kp_lognorm_mu'] = kp_lognorm_mu
-                        priors_dict['kp_lognorm_tau'] = kp_lognorm_tau
-                    elif kp_disttype == 'uniform':
-                        kp = pymc.Uniform('kp', lower=kp_bndlow, upper=kp_bndhigh, value=kp_start)
-                        priors_dict['kp_bndlow'] = kp_bndlow
-                        priors_dict['kp_bndhigh'] = kp_bndhigh
+#                     # ===== PRIOR DISTRIBUTIONS =====
+#                     # Priors dict to record values for export
+#                     priors_dict = {}
+#                     priors_dict['kp_disttype'] = kp_disttype
+#                     priors_dict['tbias_disttype'] = tbias_disttype
+#                     priors_dict['ddfsnow_disttype'] = ddfsnow_disttype
+#                     # Precipitation factor [-]
+#                     if kp_disttype == 'gamma':
+#                         kp = pymc.Gamma('kp', alpha=kp_gamma_alpha, beta=kp_gamma_beta, value=kp_start)
+#                         priors_dict['kp_gamma_alpha'] = kp_gamma_alpha
+#                         priors_dict['kp_gamma_beta'] = kp_gamma_beta
+#                     elif kp_disttype =='lognormal':
+#                         #  lognormal distribution (roughly 0.3 to 3)
+#                         kp_start = np.exp(kp_start)
+#                         kp = pymc.Lognormal('kp', mu=kp_lognorm_mu, tau=kp_lognorm_tau, value=kp_start)
+#                         priors_dict['kp_lognorm_mu'] = kp_lognorm_mu
+#                         priors_dict['kp_lognorm_tau'] = kp_lognorm_tau
+#                     elif kp_disttype == 'uniform':
+#                         kp = pymc.Uniform('kp', lower=kp_bndlow, upper=kp_bndhigh, value=kp_start)
+#                         priors_dict['kp_bndlow'] = kp_bndlow
+#                         priors_dict['kp_bndhigh'] = kp_bndhigh
 
-                    # Temperature bias [degC]
-                    if tbias_disttype == 'normal':
-                        tbias = pymc.Normal('tbias', mu=tbias_mu, tau=1/(tbias_sigma**2), value=tbias_start)
-                        priors_dict['tbias_mu'] = tbias_mu
-                        priors_dict['tbias_sigma'] = tbias_sigma
-                    elif tbias_disttype =='truncnormal':
-                        tbias = pymc.TruncatedNormal('tbias', mu=tbias_mu, tau=1/(tbias_sigma**2),
-                                                    a=tbias_bndlow, b=tbias_bndhigh, value=tbias_start)
-                        priors_dict['tbias_mu'] = tbias_mu
-                        priors_dict['tbias_sigma'] = tbias_sigma
-                        priors_dict['tbias_bndlow'] = tbias_bndlow
-                        priors_dict['tbias_bndhigh'] = tbias_bndhigh
-                    elif tbias_disttype =='uniform':
-                        tbias = pymc.Uniform('tbias', lower=tbias_bndlow, upper=tbias_bndhigh, value=tbias_start)
-                        priors_dict['tbias_bndlow'] = tbias_bndlow
-                        priors_dict['tbias_bndhigh'] = tbias_bndhigh
+#                     # Temperature bias [degC]
+#                     if tbias_disttype == 'normal':
+#                         tbias = pymc.Normal('tbias', mu=tbias_mu, tau=1/(tbias_sigma**2), value=tbias_start)
+#                         priors_dict['tbias_mu'] = tbias_mu
+#                         priors_dict['tbias_sigma'] = tbias_sigma
+#                     elif tbias_disttype =='truncnormal':
+#                         tbias = pymc.TruncatedNormal('tbias', mu=tbias_mu, tau=1/(tbias_sigma**2),
+#                                                     a=tbias_bndlow, b=tbias_bndhigh, value=tbias_start)
+#                         priors_dict['tbias_mu'] = tbias_mu
+#                         priors_dict['tbias_sigma'] = tbias_sigma
+#                         priors_dict['tbias_bndlow'] = tbias_bndlow
+#                         priors_dict['tbias_bndhigh'] = tbias_bndhigh
+#                     elif tbias_disttype =='uniform':
+#                         tbias = pymc.Uniform('tbias', lower=tbias_bndlow, upper=tbias_bndhigh, value=tbias_start)
+#                         priors_dict['tbias_bndlow'] = tbias_bndlow
+#                         priors_dict['tbias_bndhigh'] = tbias_bndhigh
 
-                    # Degree day factor of snow [mwe degC-1 d-1]
-                    #  always truncated normal distribution with mean 0.0041 mwe degC-1 d-1 and standard deviation of
-                    #  0.0015 (Braithwaite, 2008), since it's based on data; uniform should only be used for testing
-                    if ddfsnow_disttype == 'truncnormal':
-                        ddfsnow = pymc.TruncatedNormal('ddfsnow', mu=ddfsnow_mu, tau=1/(ddfsnow_sigma**2),
-                                                      a=ddfsnow_bndlow, b=ddfsnow_bndhigh, value=ddfsnow_start)
-                        priors_dict['ddfsnow_mu'] = ddfsnow_mu
-                        priors_dict['ddfsnow_sigma'] = ddfsnow_sigma
-                        priors_dict['ddfsnow_bndlow'] = ddfsnow_bndlow
-                        priors_dict['ddfsnow_bndhigh'] = ddfsnow_bndhigh
-                    elif ddfsnow_disttype == 'uniform':
-                        ddfsnow = pymc.Uniform('ddfsnow', lower=ddfsnow_bndlow, upper=ddfsnow_bndhigh,
-                                              value=ddfsnow_start)
-                        priors_dict['ddfsnow_bndlow'] = ddfsnow_bndlow
-                        priors_dict['ddfsnow_bndhigh'] = ddfsnow_bndhigh
+#                     # Degree day factor of snow [mwe degC-1 d-1]
+#                     #  always truncated normal distribution with mean 0.0041 mwe degC-1 d-1 and standard deviation of
+#                     #  0.0015 (Braithwaite, 2008), since it's based on data; uniform should only be used for testing
+#                     if ddfsnow_disttype == 'truncnormal':
+#                         ddfsnow = pymc.TruncatedNormal('ddfsnow', mu=ddfsnow_mu, tau=1/(ddfsnow_sigma**2),
+#                                                       a=ddfsnow_bndlow, b=ddfsnow_bndhigh, value=ddfsnow_start)
+#                         priors_dict['ddfsnow_mu'] = ddfsnow_mu
+#                         priors_dict['ddfsnow_sigma'] = ddfsnow_sigma
+#                         priors_dict['ddfsnow_bndlow'] = ddfsnow_bndlow
+#                         priors_dict['ddfsnow_bndhigh'] = ddfsnow_bndhigh
+#                     elif ddfsnow_disttype == 'uniform':
+#                         ddfsnow = pymc.Uniform('ddfsnow', lower=ddfsnow_bndlow, upper=ddfsnow_bndhigh,
+#                                               value=ddfsnow_start)
+#                         priors_dict['ddfsnow_bndlow'] = ddfsnow_bndlow
+#                         priors_dict['ddfsnow_bndhigh'] = ddfsnow_bndhigh
 
-                    # ===== DETERMINISTIC FUNCTION ====
-                    # Define deterministic function for MCMC model based on our a priori probobaility distributions.
-                    @deterministic(plot=False)
-                    def massbal(tbias=tbias, kp=kp, ddfsnow=ddfsnow):
-                        """ Likelihood function for mass balance [mwea] based on model parameters """
-                        modelprms_copy = modelprms.copy()
-                        if tbias is not None:
-                            modelprms_copy['tbias'] = float(tbias)
-                        if kp is not None:
-                            modelprms_copy['kp'] = float(kp)
-                        if ddfsnow is not None:
-                            modelprms_copy['ddfsnow'] = float(ddfsnow)
-                            modelprms_copy['ddfice'] = modelprms_copy['ddfsnow'] / pygem_prms.ddfsnow_iceratio
-#                        mb_mwea = mb_mwea_calc(gdir, modelprms_copy, glacier_rgi_table, fls=fls)
-                        mb_mwea = mbEmulator.eval([modelprms_copy['tbias'], modelprms_copy['kp'], modelprms_copy['ddfsnow']])
-                        return mb_mwea
+#                     # ===== DETERMINISTIC FUNCTION ====
+#                     # Define deterministic function for MCMC model based on our a priori probobaility distributions.
+#                     @deterministic(plot=False)
+#                     def massbal(tbias=tbias, kp=kp, ddfsnow=ddfsnow):
+#                         """ Likelihood function for mass balance [mwea] based on model parameters """
+#                         modelprms_copy = modelprms.copy()
+#                         if tbias is not None:
+#                             modelprms_copy['tbias'] = float(tbias)
+#                         if kp is not None:
+#                             modelprms_copy['kp'] = float(kp)
+#                         if ddfsnow is not None:
+#                             modelprms_copy['ddfsnow'] = float(ddfsnow)
+#                             modelprms_copy['ddfice'] = modelprms_copy['ddfsnow'] / pygem_prms.ddfsnow_iceratio
+# #                        mb_mwea = mb_mwea_calc(gdir, modelprms_copy, glacier_rgi_table, fls=fls)
+#                         mb_mwea = mbEmulator.eval([modelprms_copy['tbias'], modelprms_copy['kp'], modelprms_copy['ddfsnow']])
+#                         return mb_mwea
 
 
-                    # ===== POTENTIAL FUNCTIONS =====
-                    # Potential functions are used to impose additional constrains on the model
-                    @pymc.potential
-                    def mb_max(mb_max_loss=mb_max_loss, massbal=massbal):
-                        """ Model parameters cannot completely melt the glacier """
-                        if massbal < mb_max_loss:
-                            return -np.inf
-                        else:
-                            return 0
+#                     # ===== POTENTIAL FUNCTIONS =====
+#                     # Potential functions are used to impose additional constrains on the model
+#                     @pymc.potential
+#                     def mb_max(mb_max_loss=mb_max_loss, massbal=massbal):
+#                         """ Model parameters cannot completely melt the glacier """
+#                         if massbal < mb_max_loss:
+#                             return -np.inf
+#                         else:
+#                             return 0
                         
-                    @pymc.potential
-                    def must_melt(tbias=tbias, kp=kp, ddfsnow=ddfsnow):
-                        """
-                        Likelihood function for mass balance [mwea] based on model parameters
-                        """                          
-                        modelprms_copy = modelprms.copy()
-                        if tbias is not None:
-                            modelprms_copy['tbias'] = float(tbias)
-                        if kp is not None:
-                            modelprms_copy['kp'] = float(kp)
-                        if ddfsnow is not None:
-                            modelprms_copy['ddfsnow'] = float(ddfsnow)
-                            modelprms_copy['ddfice'] = modelprms_copy['ddfsnow'] / pygem_prms.ddfsnow_iceratio
-                        mb_total_minelev = calc_mb_total_minelev(modelprms_copy)
-                        if mb_total_minelev < 0:
-                            return 0
-                        else:
-                            return -np.inf
+#                     @pymc.potential
+#                     def must_melt(tbias=tbias, kp=kp, ddfsnow=ddfsnow):
+#                         """
+#                         Likelihood function for mass balance [mwea] based on model parameters
+#                         """                          
+#                         modelprms_copy = modelprms.copy()
+#                         if tbias is not None:
+#                             modelprms_copy['tbias'] = float(tbias)
+#                         if kp is not None:
+#                             modelprms_copy['kp'] = float(kp)
+#                         if ddfsnow is not None:
+#                             modelprms_copy['ddfsnow'] = float(ddfsnow)
+#                             modelprms_copy['ddfice'] = modelprms_copy['ddfsnow'] / pygem_prms.ddfsnow_iceratio
+#                         mb_total_minelev = calc_mb_total_minelev(modelprms_copy)
+#                         if mb_total_minelev < 0:
+#                             return 0
+#                         else:
+#                             return -np.inf
 
 
-                    # ===== OBSERVED DATA =====
-                    #  Observed data defines the observed likelihood of mass balances (based on geodetic observations)
-                    obs_massbal = pymc.Normal('obs_massbal', mu=massbal, tau=(1/(mb_obs_mwea_err**2)),
-                                              value=float(mb_obs_mwea), observed=True)
-                    # Set model
-                    if use_potentials:
-                        model = pymc.MCMC([{'kp':kp, 'tbias':tbias, 'ddfsnow':ddfsnow,
-                                          'massbal':massbal, 'obs_massbal':obs_massbal}, mb_max, must_melt])
-                    else:
-                        model = pymc.MCMC({'kp':kp, 'tbias':tbias, 'ddfsnow':ddfsnow,
-                                          'massbal':massbal, 'obs_massbal':obs_massbal})
+#                     # ===== OBSERVED DATA =====
+#                     #  Observed data defines the observed likelihood of mass balances (based on geodetic observations)
+#                     obs_massbal = pymc.Normal('obs_massbal', mu=massbal, tau=(1/(mb_obs_mwea_err**2)),
+#                                               value=float(mb_obs_mwea), observed=True)
+#                     # Set model
+#                     if use_potentials:
+#                         model = pymc.MCMC([{'kp':kp, 'tbias':tbias, 'ddfsnow':ddfsnow,
+#                                           'massbal':massbal, 'obs_massbal':obs_massbal}, mb_max, must_melt])
+#                     else:
+#                         model = pymc.MCMC({'kp':kp, 'tbias':tbias, 'ddfsnow':ddfsnow,
+#                                           'massbal':massbal, 'obs_massbal':obs_massbal})
 
                     
-                    # Step method (if changed from default)
-                    #  Adaptive metropolis is supposed to perform block update, i.e., update all model parameters
-                    #  together based on their covariance, which would reduce autocorrelation; however, tests show
-                    #  doesn't make a difference.
-                    if step == 'am':
-                        model.use_step_method(pymc.AdaptiveMetropolis, [kp, tbias, ddfsnow], delay = 1000)
-                    # Sample
-                    if args.progress_bar == 1:
-                        progress_bar_switch = True
-                    else:
-                        progress_bar_switch = False
-                    model.sample(iter=iterations, burn=mcmc_burn_no, thin=thin,
-                                tune_interval=tune_interval, tune_throughout=tune_throughout,
-                                save_interval=save_interval, verbose=verbose, progress_bar=progress_bar_switch)
-                    # Close database
-                    model.db.close()
+#                     # Step method (if changed from default)
+#                     #  Adaptive metropolis is supposed to perform block update, i.e., update all model parameters
+#                     #  together based on their covariance, which would reduce autocorrelation; however, tests show
+#                     #  doesn't make a difference.
+#                     if step == 'am':
+#                         model.use_step_method(pymc.AdaptiveMetropolis, [kp, tbias, ddfsnow], delay = 1000)
+#                     # Sample
+#                     if args.progress_bar == 1:
+#                         progress_bar_switch = True
+#                     else:
+#                         progress_bar_switch = False
+#                     model.sample(iter=iterations, burn=mcmc_burn_no, thin=thin,
+#                                 tune_interval=tune_interval, tune_throughout=tune_throughout,
+#                                 save_interval=save_interval, verbose=verbose, progress_bar=progress_bar_switch)
+#                     # Close database
+#                     model.db.close()
 
-                    return model, priors_dict
+#                     return model, priors_dict
                 
                 try:
+                # for batman in [0]:
                     # ===== RUNNING MCMC =====
                     # Prior distributions (specified or informed by regions)
                     if pygem_prms.priors_reg_fullfn is not None:
@@ -1356,6 +1366,16 @@ def main(list_packed_vars):
                         # Temperature bias priors
                         tbias_mu = pygem_prms.tbias_mu
                         tbias_sigma = pygem_prms.tbias_sigma
+
+                    # define priors
+                    priors =    {
+                                'kp':      {'type':'gamma', 'alpha':kp_gamma_alpha, 'beta':kp_gamma_beta},
+                                'tbias':    {'type':'normal', 'mu':tbias_mu , 'sigma':tbias_sigma},
+                                'ddfsnow':  {'type':'truncated_normal', 'mu':pygem_prms.ddfsnow_mu, 'sigma':pygem_prms.ddfsnow_sigma ,'a':pygem_prms.ddfsnow_bndlow, 'b':pygem_prms.ddfsnow_bndhigh },
+                                }
+                    if priors['kp']['type'] == 'gamma':
+                        priors['kp']['mu'] = priors['kp']['alpha'] / priors['kp']['beta']
+                        priors['kp']['sigma'] = np.sqrt(priors['kp']['alpha']) / priors['kp']['beta']
                         
                     modelprms_export = {}
                     # fit the MCMC model
@@ -1381,11 +1401,6 @@ def main(list_packed_vars):
                             tbias_start = tbias_mu + 1.96 * tbias_sigma
                             ddfsnow_start = pygem_prms.ddfsnow_mu + 1.96 * pygem_prms.ddfsnow_sigma
                             kp_start = stats.gamma.ppf(0.95,kp_gamma_alpha, scale=1/kp_gamma_beta)
-    
-                        # Determine bounds to check TC starting values and estimate maximum mass loss
-                        modelprms['kp'] = kp_start
-                        modelprms['ddfsnow'] = ddfsnow_start
-                        modelprms['ddfice'] = modelprms['ddfsnow'] / pygem_prms.ddfsnow_iceratio
                         
                         # ----- TEMPERATURE BIAS BOUNDS -----
                         # Selects from emulator sims dataframe
@@ -1418,59 +1433,113 @@ def main(list_packed_vars):
                         mb_max_loss = (-1 * consensus_mass / pygem_prms.density_water / gdir.rgi_area_m2 / 
                                       (gdir.dates_table.shape[0] / 12))
                         
+                        # Rough estimate of minimum elevation mass balance function
+                        def calc_mb_total_minelev(modelprms):
+                            """ Approximate estimate of the mass balance at minimum elevation """
+                            fl = fls[0]
+                            min_elev = fl.surface_h.min()
+                            glacier_gcm_temp = gdir.historical_climate['temp']
+                            glacier_gcm_prec = gdir.historical_climate['prec']
+                            glacier_gcm_lr = gdir.historical_climate['lr']
+                            glacier_gcm_elev = gdir.historical_climate['elev']
+                            # Temperature using gcm and glacier lapse rates
+                            #  T_bin = T_gcm + lr_gcm * (z_ref - z_gcm) + lr_glac * (z_bin - z_ref) + tempchange
+                            T_minelev = (glacier_gcm_temp + glacier_gcm_lr *
+                                        (glacier_rgi_table.loc[pygem_prms.option_elev_ref_downscale] - glacier_gcm_elev) +
+                                        glacier_gcm_lr * 
+                                        (min_elev - glacier_rgi_table.loc[pygem_prms.option_elev_ref_downscale]) +
+                                        modelprms['tbias'])
+                            # Precipitation using precipitation factor and precipitation gradient
+                            #  P_bin = P_gcm * prec_factor * (1 + prec_grad * (z_bin - z_ref))
+                            P_minelev = (glacier_gcm_prec * modelprms['kp'] * (1 + modelprms['precgrad'] * (min_elev -
+                                        glacier_rgi_table.loc[pygem_prms.option_elev_ref_downscale])))
+                            # Accumulation using tsnow_threshold
+                            Acc_minelev = np.zeros(P_minelev.shape)
+                            Acc_minelev[T_minelev <= modelprms['tsnow_threshold']] = (
+                                    P_minelev[T_minelev <= modelprms['tsnow_threshold']])
+                            # Melt
+                            # energy available for melt [degC day]
+                            melt_energy_available = T_minelev * dates_table['daysinmonth'].values
+                            melt_energy_available[melt_energy_available < 0] = 0
+                            # assume all snow melt because anything more would melt underlying ice in lowermost bin
+                            # SNOW MELT [m w.e.]
+                            Melt_minelev = modelprms['ddfsnow'] * melt_energy_available
+                            # Total mass balance over entire period at minimum elvation
+                            mb_total_minelev = (Acc_minelev - Melt_minelev).sum()
                         
+                            return mb_total_minelev
+                        
+                        # ===== CHECK STARTING CONDITIONS (adjust tbias as needed) =====
+                        # Determine bounds to check TC starting values and estimate maximum mass loss
+                        modelprms['kp'] = kp_start
+                        modelprms['ddfsnow'] = ddfsnow_start
+                        modelprms['tbias'] = tbias_start
+                        modelprms['ddfice'] = modelprms['ddfsnow'] / pygem_prms.ddfsnow_iceratio
+                        
+                        # check starting mass balance is not less than the maximum mass loss
+                        mb_mwea_start = mbEmulator.eval([modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow']])
+                        tbias_step = 0.1
+                        while mb_mwea_start < mb_max_loss:
+                            modelprms['tbias'] = modelprms['tbias'] - tbias_step
+                            mb_mwea_start = mbEmulator.eval([modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow']])
+                            
+                        # check melting occurs for starting conditions
+                        mb_total_minelev_start = calc_mb_total_minelev(modelprms)
+                        tbias_smallstep = 0.01
+                        while mb_total_minelev_start > 0 and mb_mwea_start > mb_max_loss:
+                            modelprms['tbias'] = modelprms['tbias'] + tbias_smallstep
+                            mb_total_minelev_start = calc_mb_total_minelev(modelprms)
+                            mb_mwea_start = mbEmulator.eval([modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow']])
+                            
                         if debug:
-                            print('\ntbias_start:', np.round(tbias_start,3), 'pf_start:', np.round(kp_start,3),
-                                  'ddf_start:', np.round(ddfsnow_start,4), 'mb_max_loss:', np.round(mb_max_loss,2))
+                            print(modelprms)
                         
-                        model, priors_dict = run_MCMC(
-                                gdir,
-                                iterations=pygem_prms.mcmc_sample_no, mcmc_burn_no=pygem_prms.mcmc_burn_no,
-                                step=pygem_prms.mcmc_step,
-                                kp_gamma_alpha=kp_gamma_alpha, kp_gamma_beta=kp_gamma_beta, kp_start=kp_start,
-                                tbias_mu=tbias_mu, tbias_sigma=tbias_sigma, tbias_start=tbias_start,
-                                ddfsnow_start=ddfsnow_start, mb_max_loss=mb_max_loss,
-                                tbias_bndlow=tbias_bndlow, tbias_bndhigh=tbias_bndhigh,
-                                use_potentials=True)                    
+                        # compile initial guesses
+                        initial_guesses = torch.tensor([modelprms['kp'], modelprms['tbias'], modelprms['ddfsnow']]).flatten()
+
+                        # instantiate mbPosterior given overvations, and priors
+                        mb = mcmc.mbPosterior(torch.tensor([mb_obs_mwea]), torch.tensor([mb_obs_mwea_err]), priors, mb_func=mbEmulator.eval)
+                        initial_guesses_z = mcmc.z_normalize(initial_guesses, mb.means, mb.stds)
                         
-                        if debug:
-                            print('\nacceptance ratio:', model.step_method_dict[next(iter(model.stochastics))][0].ratio)
-                            print('mb_mwea_mean:', np.round(np.mean(model.trace('massbal')[:]),3),
-                                  'mb_mwea_std:', np.round(np.std(model.trace('massbal')[:]),3),
-                                  '\nmb_obs_mean:', np.round(mb_obs_mwea,3), 'mb_obs_std:', np.round(mb_obs_mwea_err,3))
+                        # instantiate sampler
+                        sampler = mcmc.Metropolis(mb.means, mb.stds)
+
+                        # Draw samples
+                        m_primes_z, steps, P_chain, m_chain_z = sampler.sample(initial_guesses_z, mb.log_posterior, h=0.1, n_samples=pygem_prms.mcmc_sample_no, burnin=int(pygem_prms.mcmc_burn_pct*pygem_prms.mcmc_sample_no/100), thin_factor=pygem_prms.thin_interval, progress_bar=args.progress_bar)
+
+                        # inverse z-normalize the samples to original parameter space
+                        m_chain = mcmc.inverse_z_normalize(m_chain_z, mb.means, mb.stds)
+                        m_primes = mcmc.inverse_z_normalize(m_primes_z, mb.means, mb.stds)
+                        # get mass balance for chain
+                        m_chain = torch.cat((m_chain, torch.tensor([mbEmulator.eval([mp])[0] for mp in m_chain]).reshape(-1,1)), dim=1)
+                        m_primes = torch.cat((m_primes, torch.tensor([mbEmulator.eval([mp])[0] for mp in m_primes]).reshape(-1,1)), dim=1)
+
+                        # if debug:
+                        #     print('\nacceptance ratio:', model.step_method_dict[next(iter(model.stochastics))][0].ratio)
+                        #     print('mb_mwea_mean:', np.round(np.mean(model.trace('massbal')[:]),3),
+                        #           'mb_mwea_std:', np.round(np.std(model.trace('massbal')[:]),3),
+                        #           '\nmb_obs_mean:', np.round(mb_obs_mwea,3), 'mb_obs_std:', np.round(mb_obs_mwea_err,3))
     
     
                         # Store data from model to be exported
                         chain_str = 'chain_' + str(n_chain)
-                        modelprms_export['tbias'] = {chain_str : list(model.trace('tbias')[:])}
-                        modelprms_export['kp'] = {chain_str  : list(model.trace('kp')[:])}
-                        modelprms_export['ddfsnow'] = {chain_str : list(model.trace('ddfsnow')[:])}
-                        modelprms_export['ddfice'] = {chain_str : list(model.trace('ddfsnow')[:] /
-                                                                  pygem_prms.ddfsnow_iceratio)}
-                        modelprms_export['mb_mwea'] = {chain_str : list(model.trace('massbal')[:])}
-    
+                        modelprms_export['kp'] = {chain_str  : m_chain[:,0].tolist()}
+                        modelprms_export['tbias'] = {chain_str : m_chain[:,1].tolist()}
+                        modelprms_export['ddfsnow'] = {chain_str : m_chain[:,2].tolist()}
+                        modelprms_export['ddfice'] = {chain_str : (m_chain[:,2] /
+                                                                  pygem_prms.ddfsnow_iceratio).tolist()}
+                        modelprms_export['mb_mwea'] = {chain_str : m_chain[:,3].tolist()}
+                    
                     # Export model parameters
                     modelprms_export['precgrad'] = [pygem_prms.precgrad]
                     modelprms_export['tsnow_threshold'] = [pygem_prms.tsnow_threshold]
                     modelprms_export['mb_obs_mwea'] = [mb_obs_mwea]
                     modelprms_export['mb_obs_mwea_err'] = [mb_obs_mwea_err]
-                    modelprms_export['priors'] = priors_dict
+                    modelprms_export['priors'] = priors
                     
                     modelprms_fn = glacier_str + '-modelprms_dict.pkl'
                     modelprms_fp = (pygem_prms.output_filepath + 'calibration/' + glacier_str.split('.')[0].zfill(2) 
                                     + '/')
-                    if not os.path.exists(modelprms_fp):
-                        os.makedirs(modelprms_fp, exist_ok=True)
-                    modelprms_fullfn = modelprms_fp + modelprms_fn
-                    if os.path.exists(modelprms_fullfn):
-                        with open(modelprms_fullfn, 'rb') as f:
-                            modelprms_dict = pickle.load(f)
-                        modelprms_dict[pygem_prms.option_calibration] = modelprms_export
-                    else:
-                        modelprms_dict = {pygem_prms.option_calibration: modelprms_export}
-                    with open(modelprms_fullfn, 'wb') as f:
-                        pickle.dump(modelprms_dict, f)        
-                            
                     if not os.path.exists(modelprms_fp):
                         os.makedirs(modelprms_fp, exist_ok=True)
                     modelprms_fullfn = modelprms_fp + modelprms_fn
