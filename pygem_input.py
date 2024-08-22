@@ -14,12 +14,13 @@ user_info = {'name':'Brandon Tober',
             'institution':'Carnegie Mellon University, Pittsburgh PA',
             'email':'btober@cmu.edu'}
 main_directory = os.getcwd()
-# main_directory = '/trace/group/rounce/shared/Output/'      # file path hack if data is in different location from code
+main_directory = '/trace/group/rounce/shared/Output/'      # file path hack if data is in different location from code
 # Output directory
 output_filepath = main_directory + '/../Output/'
+output_filepath = '/trace/group/rounce/btober/Output/'
 
 #%% ===== GLACIER SELECTION =====
-rgi_regionsO1 = [13]                 # 1st order region number (RGI V6.0)
+rgi_regionsO1 = [1]                 # 1st order region number (RGI V6.0)
 rgi_regionsO2 = 'all'               # 2nd order region number (RGI V6.0)
 # RGI glacier number (RGI V6.0)
 #  Three options: (1) use glacier numbers for a given region (or 'all'), must have glac_no set to None
@@ -30,10 +31,10 @@ rgi_glac_number = 'all'
 
 glac_no_skip = None
 glac_no = None 
-glac_no = ['15.03733'] # Khumbu Glacier
+# glac_no = ['15.03733'] # Khumbu Glacier
 # glac_no = ['1.10689'] # Columbia Glacier
 # glac_no = ['1.03622'] # LeConte Glacier
-
+# glac_no = ['1.15648'] # kennicott
 
 if glac_no is not None:
     rgi_regionsO1 = sorted(list(set([int(x.split('.')[0]) for x in glac_no])))
@@ -80,7 +81,7 @@ if hindcast:
 
 #%% ===== CALIBRATION OPTIONS =====
 # Calibration option ('emulator', 'MCMC', 'MCMC_fullsim' 'HH2015', 'HH2015mod', None)
-option_calibration = 'HH2015'
+option_calibration = 'MCMC'
 
 # Prior distribution (specify filename or set equal to None)
 priors_reg_fullfn = main_directory + '/../Output/calibration/priors_region.csv'
@@ -112,7 +113,7 @@ elif option_calibration == 'HH2015mod':
     
 elif option_calibration == 'emulator':
     emulator_sims = 100             # Number of simulations to develop the emulator
-    overwrite_em_sims = False       # Overwrite emulator simulations
+    overwrite_em_sims = True       # Overwrite emulator simulations
     opt_hh2015_mod = True           # Option to also perform the HH2015_mod calibration using the emulator
     emulator_fp = output_filepath + 'emulator/'
     tbias_step = 0.5                # tbias step size
@@ -145,10 +146,8 @@ elif option_calibration in ['MCMC', 'MCMC_fullsim']:
     tbias_stepsmall = 0.1
     option_areaconstant = True      # Option to keep area constant or evolve
     # Chain options
-    n_chains = 1                    # number of chains (min 1, max 3)
+    n_chains = 3                    # number of chains (min 1, max 3)
     mcmc_sample_no = 10000         # number of steps (10000 was found to be sufficient in HMA)
-    mcmc_burn_no = 200              # number of steps to burn-in (0 records all steps in chain)
-#    mcmc_sample_no = 100          # number of steps (10000 was found to be sufficient in HMA)
     mcmc_burn_pct = 2               # percentage of steps to burn-in (0 records all steps in chain)
     mcmc_step = None                # step option (None or 'am')
     thin_interval = 10              # thin interval if need to reduce file size (best to leave at 1 if space allows)
@@ -186,6 +185,7 @@ elif option_calibration in ['MCMC', 'MCMC_fullsim']:
 hugonnet_fp = main_directory + '/../DEMs/Hugonnet2020/'
 #hugonnet_fn = 'df_pergla_global_20yr-filled.csv'
 hugonnet_fn = 'df_pergla_global_20yr-filled-FAcorrected.csv'
+assert os.path.exists(hugonnet_fp + hugonnet_fn), f'mb dataset not found : {hugonnet_fp + hugonnet_fn}'
 if '-filled' in hugonnet_fn:
     hugonnet_mb_cn = 'mb_mwea'
     hugonnet_mb_err_cn = 'mb_mwea_err'
@@ -211,7 +211,7 @@ icethickness_cal_frac_byarea = 0.9  # Regional glacier area fraction that is use
 
 #%% ===== SIMULATION AND GLACIER DYNAMICS OPTIONS =====
 # Glacier dynamics scheme (options: 'OGGM', 'MassRedistributionCurves', None)
-option_dynamics = 'OGGM'
+option_dynamics = None
     
 # Bias adjustment option (options: 0, 1, 2, 3) 
 #  0: no adjustment

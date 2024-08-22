@@ -37,11 +37,6 @@ import torch
 import gpytorch
 import sklearn.model_selection
 
-# Model-specific libraries
-if 'MCMC' in pygem_prms.option_calibration:
-    import pymc
-    from pymc import deterministic
-
 #%% FUNCTIONS
 def getparser():
     """
@@ -169,7 +164,7 @@ class massbalEmulator:
         # ----- LOAD EMULATOR -----
         torch.set_num_threads(1)
 
-        state_dict = torch.load(em_mod_path)
+        state_dict = torch.load(em_mod_path, weights_only=False)
         
         emulator_extra_fp = em_mod_path.replace('.pth', '_extra.pkl')
         with open(emulator_extra_fp, 'rb') as f:
@@ -460,8 +455,10 @@ def main(list_packed_vars):
 
             # ----- Calibration data -----
             try:
+            # for batman in [0]:
 
                 mbdata_fn = gdir.get_filepath('mb_obs')
+
                 if not os.path.exists(mbdata_fn):
                     # Compute all the stuff
                         list_tasks = [          
@@ -1046,10 +1043,8 @@ def main(list_packed_vars):
                 # load emulator
                 em_mod_fn = glacier_str + '-emulator-mb_mwea.pth'
                 em_mod_fp = pygem_prms.emulator_fp + 'models/' + glacier_str.split('.')[0].zfill(2) + '/'
-                if not os.path.exists(em_mod_fp + em_mod_fn):
-                    mbEmulator = create_emulator(glacier_str, sims_df, y_cn='mb_mwea')
-                else:
-                    mbEmulator = massbalEmulator.load(em_mod_path = em_mod_fp + em_mod_fn)
+                assert os.path.exists(em_mod_fp + em_mod_fn), f'emulator output does not exist : {em_mod_fp + em_mod_fn}'
+                mbEmulator = massbalEmulator.load(em_mod_path = em_mod_fp + em_mod_fn)
 
 #                 # ===== Define functions needed for MCMC method =====
 #                 def run_MCMC(gdir,
@@ -1504,12 +1499,13 @@ def main(list_packed_vars):
                         # instantiate sampler
                         sampler = mcmc.Metropolis(mb.means, mb.stds)
 
-                        # Draw samples
+                        # draw samples
                         m_primes_z, steps, P_chain, m_chain_z = sampler.sample(initial_guesses_z, mb.log_posterior, h=0.1, n_samples=pygem_prms.mcmc_sample_no, burnin=int(pygem_prms.mcmc_burn_pct*pygem_prms.mcmc_sample_no/100), thin_factor=pygem_prms.thin_interval, progress_bar=args.progress_bar)
 
                         # inverse z-normalize the samples to original parameter space
                         m_chain = mcmc.inverse_z_normalize(m_chain_z, mb.means, mb.stds)
                         m_primes = mcmc.inverse_z_normalize(m_primes_z, mb.means, mb.stds)
+
                         # get mass balance for chain
                         m_chain = torch.cat((m_chain, torch.tensor([mbEmulator.eval([mp])[0] for mp in m_chain]).reshape(-1,1)), dim=1)
                         m_primes = torch.cat((m_primes, torch.tensor([mbEmulator.eval([mp])[0] for mp in m_primes]).reshape(-1,1)), dim=1)
@@ -1520,7 +1516,6 @@ def main(list_packed_vars):
                         #           'mb_mwea_std:', np.round(np.std(model.trace('massbal')[:]),3),
                         #           '\nmb_obs_mean:', np.round(mb_obs_mwea,3), 'mb_obs_std:', np.round(mb_obs_mwea_err,3))
     
-    
                         # Store data from model to be exported
                         chain_str = 'chain_' + str(n_chain)
                         modelprms_export['kp'] = {chain_str  : m_chain[:,0].tolist()}
@@ -1529,14 +1524,15 @@ def main(list_packed_vars):
                         modelprms_export['ddfice'] = {chain_str : (m_chain[:,2] /
                                                                   pygem_prms.ddfsnow_iceratio).tolist()}
                         modelprms_export['mb_mwea'] = {chain_str : m_chain[:,3].tolist()}
-                    
+                        modelprms_export['P'] = {chain_str : P_chain.tolist()}
+
                     # Export model parameters
                     modelprms_export['precgrad'] = [pygem_prms.precgrad]
                     modelprms_export['tsnow_threshold'] = [pygem_prms.tsnow_threshold]
                     modelprms_export['mb_obs_mwea'] = [mb_obs_mwea]
                     modelprms_export['mb_obs_mwea_err'] = [mb_obs_mwea_err]
                     modelprms_export['priors'] = priors
-                    
+
                     modelprms_fn = glacier_str + '-modelprms_dict.pkl'
                     modelprms_fp = (pygem_prms.output_filepath + 'calibration/' + glacier_str.split('.')[0].zfill(2) 
                                     + '/')

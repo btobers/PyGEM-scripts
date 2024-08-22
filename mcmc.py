@@ -165,7 +165,7 @@ class mbPosterior:
     def log_posterior(self,m):
         return self.log_prior(m) + self.log_likelihood(m)
     
-
+# Metropolis-Hastings Markoc chain Monte Carlo class
 class Metropolis:
     def __init__(self, means, stds):
         # Initialize chains
