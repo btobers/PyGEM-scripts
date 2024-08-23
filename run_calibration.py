@@ -1372,7 +1372,11 @@ def main(list_packed_vars):
                         priors['kp']['mu'] = priors['kp']['alpha'] / priors['kp']['beta']
                         priors['kp']['sigma'] = np.sqrt(priors['kp']['alpha']) / priors['kp']['beta']
                         
+                    # prepare export modelprms dictionary
                     modelprms_export = {}
+                    for k in ['kp','tbias','ddfsnow','ddfice','mb_mwea','P']:
+                        modelprms_export[k] = {}
+
                     # fit the MCMC model
                     for n_chain in range(0,pygem_prms.n_chains):
     
@@ -1518,13 +1522,13 @@ def main(list_packed_vars):
     
                         # Store data from model to be exported
                         chain_str = 'chain_' + str(n_chain)
-                        modelprms_export['kp'] = {chain_str  : m_chain[:,0].tolist()}
-                        modelprms_export['tbias'] = {chain_str : m_chain[:,1].tolist()}
-                        modelprms_export['ddfsnow'] = {chain_str : m_chain[:,2].tolist()}
-                        modelprms_export['ddfice'] = {chain_str : (m_chain[:,2] /
-                                                                  pygem_prms.ddfsnow_iceratio).tolist()}
-                        modelprms_export['mb_mwea'] = {chain_str : m_chain[:,3].tolist()}
-                        modelprms_export['P'] = {chain_str : P_chain.tolist()}
+                        modelprms_export['kp'][chain_str] = m_chain[:,0].tolist()
+                        modelprms_export['tbias'][chain_str] = m_chain[:,1].tolist()
+                        modelprms_export['ddfsnow'][chain_str] = m_chain[:,2].tolist()
+                        modelprms_export['ddfice'][chain_str] = (m_chain[:,2] /
+                                                                  pygem_prms.ddfsnow_iceratio).tolist()
+                        modelprms_export['mb_mwea'][chain_str] = m_chain[:,3].tolist()
+                        modelprms_export['P'][chain_str] = P_chain.tolist()
 
                     # Export model parameters
                     modelprms_export['precgrad'] = [pygem_prms.precgrad]
