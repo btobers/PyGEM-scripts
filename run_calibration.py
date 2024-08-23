@@ -7,6 +7,7 @@ import multiprocessing
 import os
 import sys
 import time
+import math
 # External libraries
 import pandas as pd
 import pickle
@@ -1015,9 +1016,9 @@ def main(list_packed_vars):
                     modelprms = modelparams_opt
                     for vn in ['ddfice', 'ddfsnow', 'kp', 'precgrad', 'tbias', 'tsnow_threshold']:
                         modelprms[vn] = [modelprms[vn]]
-                    modelprms['mb_mwea'] = [mb_mwea]
-                    modelprms['mb_obs_mwea'] = [mb_obs_mwea]
-                    modelprms['mb_obs_mwea_err'] = [mb_obs_mwea_err]
+                    modelprms['mb_mwea'] = [float(mb_mwea)]
+                    modelprms['mb_obs_mwea'] = [float(mb_obs_mwea)]
+                    modelprms['mb_obs_mwea_err'] = [float(mb_obs_mwea_err)]
                     
                     modelprms_fn = glacier_str + '-modelprms_dict.pkl'
                     modelprms_fp = (pygem_prms.output_filepath + 'calibration/' + glacier_str.split('.')[0].zfill(2) 
@@ -1364,13 +1365,13 @@ def main(list_packed_vars):
 
                     # define priors
                     priors =    {
-                                'kp':      {'type':'gamma', 'alpha':kp_gamma_alpha, 'beta':kp_gamma_beta},
-                                'tbias':    {'type':'normal', 'mu':tbias_mu , 'sigma':tbias_sigma},
+                                'kp':      {'type':'gamma', 'alpha':float(kp_gamma_alpha), 'beta':float(kp_gamma_beta)},
+                                'tbias':    {'type':'normal', 'mu':float(tbias_mu) , 'sigma':float(tbias_sigma)},
                                 'ddfsnow':  {'type':'truncated_normal', 'mu':pygem_prms.ddfsnow_mu, 'sigma':pygem_prms.ddfsnow_sigma ,'a':pygem_prms.ddfsnow_bndlow, 'b':pygem_prms.ddfsnow_bndhigh },
                                 }
                     if priors['kp']['type'] == 'gamma':
                         priors['kp']['mu'] = priors['kp']['alpha'] / priors['kp']['beta']
-                        priors['kp']['sigma'] = np.sqrt(priors['kp']['alpha']) / priors['kp']['beta']
+                        priors['kp']['sigma'] = math.sqrt(priors['kp']['alpha']) / priors['kp']['beta']
                         
                     # prepare export modelprms dictionary
                     modelprms_export = {}
@@ -1533,8 +1534,8 @@ def main(list_packed_vars):
                     # Export model parameters
                     modelprms_export['precgrad'] = [pygem_prms.precgrad]
                     modelprms_export['tsnow_threshold'] = [pygem_prms.tsnow_threshold]
-                    modelprms_export['mb_obs_mwea'] = [mb_obs_mwea]
-                    modelprms_export['mb_obs_mwea_err'] = [mb_obs_mwea_err]
+                    modelprms_export['mb_obs_mwea'] = [float(mb_obs_mwea)]
+                    modelprms_export['mb_obs_mwea_err'] = [float(mb_obs_mwea_err)]
                     modelprms_export['priors'] = priors
 
                     modelprms_fn = glacier_str + '-modelprms_dict.pkl'
