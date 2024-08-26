@@ -147,7 +147,7 @@ class massbalEmulator:
         self.y_mean = y_mean
         self.y_std = y_std
 
-    # evaluate the emulator for a given set of model paramaters
+    # evaluate the emulator for a given set of model paramaters (note, Xtest should be ordered as so: [tbias, kp, ddfsnow])
     def eval(self, Xtest):
         # normalize each parameter
         Xtest[:] = [(x - mu) / sigma for x, mu, sigma in zip(Xtest, self.X_mean, self.X_std)]
@@ -217,12 +217,12 @@ def create_emulator(glacier_str, sims_df, y_cn,
     
     assert y_cn in sims_df.columns, 'emulator error: y_cn not in sims_df'
 
-    ##################        
-    ### get X data ###
-    ##################
+    ###################        
+    ### get Xy data ###
+    ###################
     
-    X = sims_df.loc[:,X_cns].values
-    y = sims_df[y_cn].values
+    X = sims_df.loc[:,X_cns]
+    y = sims_df.loc[:,y_cn]
 
     if debug:
         print(f'Calibration x-parameters: {", ".join(X_cns)}')
@@ -231,8 +231,11 @@ def create_emulator(glacier_str, sims_df, y_cn,
         print(f'X-shape:\n{X.shape}\n')
         print(f'y:\n{y}')
         print(f'y-shape:\n{y.shape}')
-
-    ##################
+    
+    ###################
+    # pull values (note order matters here. whenever emulator is evaluated, order should be same as order in X)
+    X = X.values
+    y = y.values
     # Normalize data
     X_mean = X.mean(axis=0)
     X_std = X.std(axis=0)
@@ -826,8 +829,8 @@ def main(list_packed_vars):
                     # ----- TEMPERATURE BIAS BOUNDS -----
                     # Selects from emulator sims dataframe
                     sims_df_subset = sims_df.loc[sims_df['kp']==1, :]
-                    tbias_bndhigh = sims_df_subset['tbias'].max()
-                    tbias_bndlow = sims_df_subset['tbias'].min()
+                    tbias_bndhigh = float(sims_df_subset['tbias'].max())
+                    tbias_bndlow = float(sims_df_subset['tbias'].min())
                     
                     # Adjust tbias_init based on bounds
                     if tbias_init > tbias_bndhigh:
@@ -1340,9 +1343,10 @@ def main(list_packed_vars):
 
 #                     return model, priors_dict
                 
+                # ===== RUNNING MCMC =====
                 try:
                 # for batman in [0]:
-                    # ===== RUNNING MCMC =====
+                    # ----- PRIORS -----
                     # Prior distributions (specified or informed by regions)
                     if pygem_prms.priors_reg_fullfn is not None:
                         # Load priors
@@ -1350,11 +1354,11 @@ def main(list_packed_vars):
                         priors_idx = np.where((priors_df.O1Region == glacier_rgi_table['O1Region']) & 
                                               (priors_df.O2Region == glacier_rgi_table['O2Region']))[0][0]
                         # Precipitation factor priors
-                        kp_gamma_alpha = priors_df.loc[priors_idx, 'kp_alpha']
-                        kp_gamma_beta = priors_df.loc[priors_idx, 'kp_beta']
+                        kp_gamma_alpha = float(priors_df.loc[priors_idx, 'kp_alpha'])
+                        kp_gamma_beta = float(priors_df.loc[priors_idx, 'kp_beta'])
                         # Temperature bias priors
-                        tbias_mu = priors_df.loc[priors_idx, 'tbias_mean']
-                        tbias_sigma = priors_df.loc[priors_idx, 'tbias_std']
+                        tbias_mu = float(priors_df.loc[priors_idx, 'tbias_mean'])
+                        tbias_sigma = float(priors_df.loc[priors_idx, 'tbias_std'])
                     else:
                         # Precipitation factor priors
                         kp_gamma_alpha = pygem_prms.kp_gamma_alpha
@@ -1363,22 +1367,104 @@ def main(list_packed_vars):
                         tbias_mu = pygem_prms.tbias_mu
                         tbias_sigma = pygem_prms.tbias_sigma
 
-                    # define priors
+                    # put all priors info together into a dictionary
                     priors =    {
-                                'kp':      {'type':'gamma', 'alpha':float(kp_gamma_alpha), 'beta':float(kp_gamma_beta)},
                                 'tbias':    {'type':'normal', 'mu':float(tbias_mu) , 'sigma':float(tbias_sigma)},
+                                'kp':      {'type':'gamma', 'alpha':float(kp_gamma_alpha), 'beta':float(kp_gamma_beta)},
                                 'ddfsnow':  {'type':'truncated_normal', 'mu':pygem_prms.ddfsnow_mu, 'sigma':pygem_prms.ddfsnow_sigma ,'a':pygem_prms.ddfsnow_bndlow, 'b':pygem_prms.ddfsnow_bndhigh },
                                 }
                     if priors['kp']['type'] == 'gamma':
                         priors['kp']['mu'] = priors['kp']['alpha'] / priors['kp']['beta']
                         priors['kp']['sigma'] = math.sqrt(priors['kp']['alpha']) / priors['kp']['beta']
-                        
+
+                    # ----- TEMPERATURE BIAS BOUNDS -----
+                    # Selects from emulator sims dataframe
+                    sims_fp = pygem_prms.emulator_fp + 'sims/' + glacier_str.split('.')[0].zfill(2) + '/'
+                    sims_fn = glacier_str + '-' + str(pygem_prms.emulator_sims) + '_emulator_sims.csv'
+                    sims_df = pd.read_csv(sims_fp + sims_fn)
+                    sims_df_subset = sims_df.loc[sims_df['kp']==1, :]
+                    tbias_bndhigh = float(sims_df_subset['tbias'].max())
+                    tbias_bndlow = float(sims_df_subset['tbias'].min())
+
+                    # ----- MASS BALANCE MAX LOSS -----
+                    # Maximum mass loss [mwea] (based on consensus ice thickness estimate)
+                    # consensus_mass has units of kg
+                    if os.path.exists(gdir.get_filepath('consensus_mass')):
+                        with open(gdir.get_filepath('consensus_mass'), 'rb') as f:
+                            consensus_mass = pickle.load(f)
+                    else:
+                        # Mean global ice thickness from Farinotti et al. (2019) used for missing consensus glaciers
+                        ice_thickness_constant = 224
+                        consensus_mass = glacier_rgi_table.Area * 1e6 * ice_thickness_constant * pygem_prms.density_ice
+
+                    mb_max_loss = (-1 * consensus_mass / pygem_prms.density_water / gdir.rgi_area_m2 / 
+                                    (gdir.dates_table.shape[0] / 12))
+
+                    # ----- FUNCTION DECLARATIONS -----                    
+                    # Rough estimate of minimum elevation mass balance function
+                    def calc_mb_total_minelev(modelprms):
+                        """ Approximate estimate of the mass balance at minimum elevation """
+                        fl = fls[0]
+                        min_elev = fl.surface_h.min()
+                        glacier_gcm_temp = gdir.historical_climate['temp']
+                        glacier_gcm_prec = gdir.historical_climate['prec']
+                        glacier_gcm_lr = gdir.historical_climate['lr']
+                        glacier_gcm_elev = gdir.historical_climate['elev']
+                        # Temperature using gcm and glacier lapse rates
+                        #  T_bin = T_gcm + lr_gcm * (z_ref - z_gcm) + lr_glac * (z_bin - z_ref) + tempchange
+                        T_minelev = (glacier_gcm_temp + glacier_gcm_lr *
+                                    (glacier_rgi_table.loc[pygem_prms.option_elev_ref_downscale] - glacier_gcm_elev) +
+                                    glacier_gcm_lr * 
+                                    (min_elev - glacier_rgi_table.loc[pygem_prms.option_elev_ref_downscale]) +
+                                    modelprms['tbias'])
+                        # Precipitation using precipitation factor and precipitation gradient
+                        #  P_bin = P_gcm * prec_factor * (1 + prec_grad * (z_bin - z_ref))
+                        P_minelev = (glacier_gcm_prec * modelprms['kp'] * (1 + modelprms['precgrad'] * (min_elev -
+                                    glacier_rgi_table.loc[pygem_prms.option_elev_ref_downscale])))
+                        # Accumulation using tsnow_threshold
+                        Acc_minelev = np.zeros(P_minelev.shape)
+                        Acc_minelev[T_minelev <= modelprms['tsnow_threshold']] = (
+                                P_minelev[T_minelev <= modelprms['tsnow_threshold']])
+                        # Melt
+                        # energy available for melt [degC day]
+                        melt_energy_available = T_minelev * dates_table['daysinmonth'].values
+                        melt_energy_available[melt_energy_available < 0] = 0
+                        # assume all snow melt because anything more would melt underlying ice in lowermost bin
+                        # SNOW MELT [m w.e.]
+                        Melt_minelev = modelprms['ddfsnow'] * melt_energy_available
+                        # Total mass balance over entire period at minimum elvation
+                        mb_total_minelev = (Acc_minelev - Melt_minelev).sum()
+                    
+                        return mb_total_minelev
+                    
+                    # define a couple potential fxns (used to form psuedo-likelihoods)
+                    def mb_max(*args, **kwargs):
+                        """ Model parameters cannot completely melt the glacier """
+                        if kwargs['massbal'] < mb_max_loss:
+                            return -np.inf
+                        else:
+                            return 0
+
+                    def must_melt(kp, tbias, ddfsnow, **kwargs):
+                        """ Likelihood function for mass balance [mwea] based on model parameters """                          
+                        modelprms_copy = modelprms.copy()
+                        modelprms_copy['tbias'] = float(tbias)
+                        modelprms_copy['kp'] = float(kp)
+                        modelprms_copy['ddfsnow'] = float(ddfsnow)
+                        modelprms_copy['ddfice'] = modelprms_copy['ddfsnow'] / pygem_prms.ddfsnow_iceratio
+                        mb_total_minelev = calc_mb_total_minelev(modelprms_copy)
+                        if mb_total_minelev < 0:
+                            return 0
+                        else:
+                            return -np.inf
+
+
                     # prepare export modelprms dictionary
                     modelprms_export = {}
                     for k in ['kp','tbias','ddfsnow','ddfice','mb_mwea','P']:
                         modelprms_export[k] = {}
-
-                    # fit the MCMC model
+                        
+                    ### fit the MCMC model ###
                     for n_chain in range(0,pygem_prms.n_chains):
     
                         if debug:
@@ -1402,15 +1488,6 @@ def main(list_packed_vars):
                             ddfsnow_start = pygem_prms.ddfsnow_mu + 1.96 * pygem_prms.ddfsnow_sigma
                             kp_start = stats.gamma.ppf(0.95,kp_gamma_alpha, scale=1/kp_gamma_beta)
                         
-                        # ----- TEMPERATURE BIAS BOUNDS -----
-                        # Selects from emulator sims dataframe
-                        sims_fp = pygem_prms.emulator_fp + 'sims/' + glacier_str.split('.')[0].zfill(2) + '/'
-                        sims_fn = glacier_str + '-' + str(pygem_prms.emulator_sims) + '_emulator_sims.csv'
-                        sims_df = pd.read_csv(sims_fp + sims_fn)
-                        sims_df_subset = sims_df.loc[sims_df['kp']==1, :]
-                        tbias_bndhigh = sims_df_subset['tbias'].max()
-                        tbias_bndlow = sims_df_subset['tbias'].min()
-                        
                         if debug:
                             print('tbias_bndlow:', np.round(tbias_bndlow,2), 'tbias_bndhigh:', np.round(tbias_bndhigh,2))
                         
@@ -1419,55 +1496,6 @@ def main(list_packed_vars):
                             tbias_start = tbias_bndhigh
                         elif tbias_start < tbias_bndlow:
                             tbias_start = tbias_bndlow
-                        # ----- Mass balance max loss -----
-                        # Maximum mass loss [mwea] (based on consensus ice thickness estimate)
-                        # consensus_mass has units of kg
-                        if os.path.exists(gdir.get_filepath('consensus_mass')):
-                            with open(gdir.get_filepath('consensus_mass'), 'rb') as f:
-                                consensus_mass = pickle.load(f)
-                        else:
-                            # Mean global ice thickness from Farinotti et al. (2019) used for missing consensus glaciers
-                            ice_thickness_constant = 224
-                            consensus_mass = glacier_rgi_table.Area * 1e6 * ice_thickness_constant * pygem_prms.density_ice
-    
-                        mb_max_loss = (-1 * consensus_mass / pygem_prms.density_water / gdir.rgi_area_m2 / 
-                                      (gdir.dates_table.shape[0] / 12))
-                        
-                        # Rough estimate of minimum elevation mass balance function
-                        def calc_mb_total_minelev(modelprms):
-                            """ Approximate estimate of the mass balance at minimum elevation """
-                            fl = fls[0]
-                            min_elev = fl.surface_h.min()
-                            glacier_gcm_temp = gdir.historical_climate['temp']
-                            glacier_gcm_prec = gdir.historical_climate['prec']
-                            glacier_gcm_lr = gdir.historical_climate['lr']
-                            glacier_gcm_elev = gdir.historical_climate['elev']
-                            # Temperature using gcm and glacier lapse rates
-                            #  T_bin = T_gcm + lr_gcm * (z_ref - z_gcm) + lr_glac * (z_bin - z_ref) + tempchange
-                            T_minelev = (glacier_gcm_temp + glacier_gcm_lr *
-                                        (glacier_rgi_table.loc[pygem_prms.option_elev_ref_downscale] - glacier_gcm_elev) +
-                                        glacier_gcm_lr * 
-                                        (min_elev - glacier_rgi_table.loc[pygem_prms.option_elev_ref_downscale]) +
-                                        modelprms['tbias'])
-                            # Precipitation using precipitation factor and precipitation gradient
-                            #  P_bin = P_gcm * prec_factor * (1 + prec_grad * (z_bin - z_ref))
-                            P_minelev = (glacier_gcm_prec * modelprms['kp'] * (1 + modelprms['precgrad'] * (min_elev -
-                                        glacier_rgi_table.loc[pygem_prms.option_elev_ref_downscale])))
-                            # Accumulation using tsnow_threshold
-                            Acc_minelev = np.zeros(P_minelev.shape)
-                            Acc_minelev[T_minelev <= modelprms['tsnow_threshold']] = (
-                                    P_minelev[T_minelev <= modelprms['tsnow_threshold']])
-                            # Melt
-                            # energy available for melt [degC day]
-                            melt_energy_available = T_minelev * dates_table['daysinmonth'].values
-                            melt_energy_available[melt_energy_available < 0] = 0
-                            # assume all snow melt because anything more would melt underlying ice in lowermost bin
-                            # SNOW MELT [m w.e.]
-                            Melt_minelev = modelprms['ddfsnow'] * melt_energy_available
-                            # Total mass balance over entire period at minimum elvation
-                            mb_total_minelev = (Acc_minelev - Melt_minelev).sum()
-                        
-                            return mb_total_minelev
                         
                         # ===== CHECK STARTING CONDITIONS (adjust tbias as needed) =====
                         # Determine bounds to check TC starting values and estimate maximum mass loss
@@ -1475,7 +1503,7 @@ def main(list_packed_vars):
                         modelprms['ddfsnow'] = ddfsnow_start
                         modelprms['tbias'] = tbias_start
                         modelprms['ddfice'] = modelprms['ddfsnow'] / pygem_prms.ddfsnow_iceratio
-                        
+
                         # check starting mass balance is not less than the maximum mass loss
                         mb_mwea_start = mbEmulator.eval([modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow']])
                         tbias_step = 0.1
@@ -1493,12 +1521,15 @@ def main(list_packed_vars):
                             
                         if debug:
                             print(modelprms)
-                        
-                        # compile initial guesses
-                        initial_guesses = torch.tensor([modelprms['kp'], modelprms['tbias'], modelprms['ddfsnow']]).flatten()
 
-                        # instantiate mbPosterior given overvations, and priors
-                        mb = mcmc.mbPosterior(torch.tensor([mb_obs_mwea]), torch.tensor([mb_obs_mwea_err]), priors, mb_func=mbEmulator.eval)
+                        # set up MCMC sampling given priors, observations, and initial guesses
+                        # note, mbEmulator.eval expects the modelprms to be ordered like so: [tbias, kp, ddfsnow], so priors and initial guesses must also be ordered as such)
+                        # instantiate mbPosterior
+                        priors = {key: priors[key] for key in ['tbias','kp','ddfsnow'] if key in priors}
+                        mb = mcmc.mbPosterior(torch.tensor([mb_obs_mwea]), torch.tensor([mb_obs_mwea_err]), priors, mb_func=mbEmulator.eval, potential_fxns=[mb_max, must_melt])
+
+                        # compile initial guesses and standardize by standard deviations
+                        initial_guesses = torch.tensor([modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow']]).flatten()
                         initial_guesses_z = mcmc.z_normalize(initial_guesses, mb.means, mb.stds)
                         
                         # instantiate sampler
@@ -1512,15 +1543,17 @@ def main(list_packed_vars):
                         m_primes = mcmc.inverse_z_normalize(m_primes_z, mb.means, mb.stds)
 
                         # get mass balance for chain
-                        m_chain = torch.cat((m_chain, torch.tensor([mbEmulator.eval([mp])[0] for mp in m_chain]).reshape(-1,1)), dim=1)
-                        m_primes = torch.cat((m_primes, torch.tensor([mbEmulator.eval([mp])[0] for mp in m_primes]).reshape(-1,1)), dim=1)
+                        m_chain = torch.cat((m_chain, torch.tensor([mbEmulator.eval([*vals]) for vals in m_chain]).reshape(-1,1)), dim=1)
+                        m_primes = torch.cat((m_primes, torch.tensor([mbEmulator.eval([*vals]) for vals in m_primes]).reshape(-1,1)), dim=1)
 
-                        # if debug:
-                        #     print('\nacceptance ratio:', model.step_method_dict[next(iter(model.stochastics))][0].ratio)
-                        #     print('mb_mwea_mean:', np.round(np.mean(model.trace('massbal')[:]),3),
-                        #           'mb_mwea_std:', np.round(np.std(model.trace('massbal')[:]),3),
-                        #           '\nmb_obs_mean:', np.round(mb_obs_mwea,3), 'mb_obs_std:', np.round(mb_obs_mwea_err,3))
-    
+                        if debug:
+                            # print('\nacceptance ratio:', model.step_method_dict[next(iter(model.stochastics))][0].ratio)
+                            print('mb_mwea_mean:', np.round(torch.mean(m_chain[:,-1]).item(),3),
+                                  'mb_mwea_std:', np.round(torch.std(m_chain[:,-1]).item(),3),
+                                  '\nmb_obs_mean:', np.round(mb_obs_mwea,3), 'mb_obs_std:', np.round(mb_obs_mwea_err,3))
+                            # plot chain
+                            mcmc.plot_chain(m_primes, m_chain, P_chain, glacier_str)
+
                         # Store data from model to be exported
                         chain_str = 'chain_' + str(n_chain)
                         modelprms_export['kp'][chain_str] = m_chain[:,0].tolist()

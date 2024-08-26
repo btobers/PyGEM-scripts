@@ -3,6 +3,7 @@
 import torch
 import numpy as np
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 # z-normalization functions
 def z_normalize(params, means, std_devs):
@@ -91,62 +92,20 @@ function_map = {
     'truncated_normal': log_truncated_normal
 }
 
-def acceptance_rate(P_chain, window_size=100):
-    return np.convolve(P_chain, np.ones(window_size)/window_size, mode='valid')
-
-def effective_n(x):
-    """
-    Compute the effective sample size of a trace.
-
-    Takes the trace and computes the effective sample size
-    according to its detrended autocorrelation.
-
-    Parameters
-    ----------
-    x : list or array of chain samples
-
-    Returns
-    -------
-    effective_n : int
-        effective sample size
-    """
-    # detrend trace using mean to be consistent with statistics
-    # definition of autocorrelation
-    x = np.asarray(x)
-    x = (x - x.mean())
-    # compute autocorrelation (note: only need second half since
-    # they are symmetric)
-    rho = np.correlate(x, x, mode='full')
-    rho = rho[len(rho)//2:]
-    # normalize the autocorrelation values
-    #  note: rho[0] is the variance * n_samples, so this is consistent
-    #  with the statistics definition of autocorrelation on wikipedia
-    # (dividing by n_samples gives you the expected value).
-    rho_norm = rho / rho[0]
-    # Iterate until sum of consecutive estimates of autocorrelation is
-    # negative to avoid issues with the sum being -0.5, which returns an
-    # effective_n of infinity
-    negative_autocorr = False
-    t = 1
-    n = len(x)
-    while not negative_autocorr and (t < n):
-        if not t % 2:
-            negative_autocorr = sum(rho_norm[t-1:t+1]) < 0
-        t += 1
-    return int(n / (1 + 2*rho_norm[1:t].sum()))
-
 # mass balance posterior class
 class mbPosterior:
-    def __init__(self, mb_obs, sigma_obs, priors, mb_func):
+    def __init__(self, mb_obs, sigma_obs, priors, mb_func, potential_fxns=None):
         self.mb_obs = mb_obs
         self.sigma_obs = sigma_obs
         self.prior_params = priors
         self.mb_func = mb_func
+        self.potential_functions = potential_fxns if potential_fxns is not None else []
 
         # get mean and std for each parameter type
         self.means = torch.tensor([params['mu'] if 'mu' in params else 0 for params in priors.values()])
         self.stds = torch.tensor([params['sigma'] if 'sigma' in params else 1 for params in priors.values()])
 
+    # get total log prior density
     def log_prior(self, m):
         log_prior = []
         for i, (key, params) in enumerate(self.prior_params.items()):
@@ -157,14 +116,22 @@ class mbPosterior:
         log_prior = torch.stack(log_prior).sum()
         return log_prior
 
+    # get log likelihood
     def log_likelihood(self, m):
-        # Denormalize the parameters before calculating likelihood
         mb_pred = self.mb_func([*m])
         return log_normal_density(self.mb_obs, **{'mu': mb_pred, 'sigma': self.sigma_obs})
     
-    def log_posterior(self,m):
-        return self.log_prior(m) + self.log_likelihood(m)
-    
+    # get log potential (sum up as any declared potential functions)
+    def log_potential(self, m):
+        log_potential = 0
+        for potential_function in self.potential_functions:
+            log_potential += potential_function(*m, **{'massbal':self.mb_func([*m])})
+        return log_potential
+
+    # get log posterior (sum of log prior, log likelihood and log potential)
+    def log_posterior(self, m):
+        return self.log_prior(m) + self.log_likelihood(m) + self.log_potential(m)
+
 # Metropolis-Hastings Markoc chain Monte Carlo class
 class Metropolis:
     def __init__(self, means, stds):
@@ -220,3 +187,120 @@ class Metropolis:
                     self.m_primes.append(m_prime)
 
         return torch.vstack(self.m_primes), torch.vstack(self.steps), torch.tensor(self.P_chain), torch.vstack(self.m_chain)
+    
+### some other useful functions ###
+
+# acceptance rate, calculated as rolloing average of probability
+def acceptance_rate(P_chain, window_size=100):
+    return np.convolve(P_chain, np.ones(window_size)/window_size, mode='valid')
+
+def effective_n(x):
+    """
+    Compute the effective sample size of a trace.
+
+    Takes the trace and computes the effective sample size
+    according to its detrended autocorrelation.
+
+    Parameters
+    ----------
+    x : list or array of chain samples
+
+    Returns
+    -------
+    effective_n : int
+        effective sample size
+    """
+    # detrend trace using mean to be consistent with statistics
+    # definition of autocorrelation
+    x = np.asarray(x)
+    x = (x - x.mean())
+    # compute autocorrelation (note: only need second half since
+    # they are symmetric)
+    rho = np.correlate(x, x, mode='full')
+    rho = rho[len(rho)//2:]
+    # normalize the autocorrelation values
+    #  note: rho[0] is the variance * n_samples, so this is consistent
+    #  with the statistics definition of autocorrelation on wikipedia
+    # (dividing by n_samples gives you the expected value).
+    rho_norm = rho / rho[0]
+    # Iterate until sum of consecutive estimates of autocorrelation is
+    # negative to avoid issues with the sum being -0.5, which returns an
+    # effective_n of infinity
+    negative_autocorr = False
+    t = 1
+    n = len(x)
+    while not negative_autocorr and (t < n):
+        if not t % 2:
+            negative_autocorr = sum(rho_norm[t-1:t+1]) < 0
+        t += 1
+    return int(n / (1 + 2*rho_norm[1:t].sum()))
+
+
+def plot_chain(m_primes, m_chain, P_chain, title, ms=1, fontsize=8):
+    # Plot the trace of the parameters
+    fig, axes = plt.subplots(5, 1, figsize=(6, 8), sharex=True)
+    m_chain = m_chain.detach().numpy()
+    m_primes = m_primes.detach().numpy()
+    P_chain = P_chain.detach().numpy()
+
+    # get n_eff
+    neff = [effective_n(arr) for arr in m_chain.T]
+
+    axes[0].plot([],[],label=f'mean={np.mean(m_chain[:, 0]):.3f}\nstd={np.std(m_chain[:, 0]):.3f}')
+    l0 = axes[0].legend(loc='upper right',handlelength=0, borderaxespad=0, fontsize=fontsize)
+
+    axes[0].plot(m_primes[:, 0],'.',ms=ms, label='proposed', c='tab:blue')
+    axes[0].plot(m_chain[:, 0],'.',ms=ms, label='accepted', c='tab:orange')
+    hands, ls = axes[0].get_legend_handles_labels()
+
+    # axes[0].add_artist(leg)
+    axes[0].set_ylabel(r'$T_{bias}$', fontsize=fontsize)
+
+    axes[1].plot(m_primes[:, 1],'.',ms=ms, c='tab:blue')
+    axes[1].plot(m_chain[:, 1],'.',ms=ms, c='tab:orange')
+    axes[1].plot([],[],label=f'mean={np.mean(m_chain[:, 1]):.3f}\nstd={np.std(m_chain[:, 1]):.3f}')
+    l1 = axes[1].legend(loc='upper right',handlelength=0, borderaxespad=0, fontsize=fontsize)
+    axes[1].set_ylabel(r'$K_p$', fontsize=fontsize)
+
+    axes[2].plot(m_primes[:, 2],'.',ms=ms, c='tab:blue')
+    axes[2].plot(m_chain[:, 2],'.',ms=ms, c='tab:orange')
+    axes[2].plot([],[],label=f'mean={np.mean(m_chain[:, 2]):.3f}\nstd={np.std(m_chain[:, 2]):.3f}')
+    l2 = axes[2].legend(loc='upper right',handlelength=0, borderaxespad=0, fontsize=fontsize)
+    axes[2].set_ylabel(r'$fsnow$', fontsize=fontsize)
+
+    axes[3].plot(m_primes[:, 3],'.',ms=ms, c='tab:blue')
+    axes[3].plot(m_chain[:, 3],'.',ms=ms, c='tab:orange')
+    axes[3].plot([],[],label=f'mean={np.mean(m_chain[:, 3]):.3f}\nstd={np.std(m_chain[:, 3]):.3f}')
+    l3 = axes[3].legend(loc='upper right',handlelength=0, borderaxespad=0, fontsize=fontsize)
+    axes[3].set_ylabel(r'$\dot{{b}}$', fontsize=fontsize)
+
+    axes[4].plot(np.exp(P_chain),'tab:orange', lw=1)
+    axes[4].plot(acceptance_rate(np.exp(P_chain)), 'k', label='moving avg.', lw=1)
+    l4 = axes[4].legend(loc='upper right',handlelength=0, borderaxespad=0, fontsize=fontsize)
+    axes[4].set_ylabel(r'$AR$', fontsize=fontsize)
+
+    for i, ax in enumerate(axes):
+        ax.xaxis.set_ticks_position('both')
+        ax.yaxis.set_ticks_position('both')
+        ax.tick_params(axis="both",direction="inout")
+        if i==4:
+            continue
+        ax.plot([],[],label=f'n_eff={neff[i]}')
+        if i==0:
+            hands, ls = ax.get_legend_handles_labels()
+            ax.legend(handles=[hands[1],hands[2],hands[3]], labels=[ls[1],ls[2],ls[3]], loc='upper left', borderaxespad=0, handlelength=0, fontsize=fontsize)
+        else:
+            ax.legend(loc='upper left', borderaxespad=0, handlelength=0, fontsize=fontsize)
+
+
+    axes[0].add_artist(l0)
+    axes[1].add_artist(l1)
+    axes[2].add_artist(l2)
+    axes[3].add_artist(l3)
+    axes[4].add_artist(l4)
+    axes[0].set_title(title, fontsize=fontsize)
+
+    plt.tight_layout()
+    plt.subplots_adjust(hspace=0.1, wspace=0)
+    plt.show()
+    return
