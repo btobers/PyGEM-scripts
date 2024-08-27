@@ -1460,7 +1460,7 @@ def main(list_packed_vars):
 
                     # prepare export modelprms dictionary
                     modelprms_export = {}
-                    for k in ['kp','tbias','ddfsnow','ddfice','mb_mwea','P']:
+                    for k in ['tbias','kp','ddfsnow','ddfice','mb_mwea','P']:
                         modelprms_export[k] = {}
                         
                     ### fit the MCMC model ###
