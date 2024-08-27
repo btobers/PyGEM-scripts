@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import pygem_input as pygem_prms
 
 # z-normalization functions
 def z_normalize(params, means, std_devs):
@@ -94,16 +95,33 @@ function_map = {
 
 # mass balance posterior class
 class mbPosterior:
-    def __init__(self, mb_obs, sigma_obs, priors, mb_func, potential_fxns=None):
+    def __init__(self, mb_obs, sigma_obs, priors, mb_func, mb_args=None, potential_fxns=None, **kwargs):
         self.mb_obs = mb_obs
         self.sigma_obs = sigma_obs
         self.prior_params = priors
         self.mb_func = mb_func
+        self.mb_args = mb_args
         self.potential_functions = potential_fxns if potential_fxns is not None else []
+        self.mb_pred = None
 
         # get mean and std for each parameter type
         self.means = torch.tensor([params['mu'] if 'mu' in params else 0 for params in priors.values()])
         self.stds = torch.tensor([params['sigma'] if 'sigma' in params else 1 for params in priors.values()])
+
+    # update modelprms for evaluation
+    def update_modelprms(self, m):
+        for i, k in enumerate(['tbias','kp','ddfsnow']):
+            self.mb_args[1][k] = float(m[i])
+        self.mb_args[1]['ddfice'] = self.mb_args[1]['ddfsnow'] / pygem_prms.ddfsnow_iceratio 
+
+    # get mb_pred
+    def get_mb_pred(self, m):
+        if self.mb_args:
+            self.update_modelprms(m)
+
+            self.mb_pred = self.mb_func(*self.mb_args)
+        else:
+            self.mb_pred = self.mb_func([*m])
 
     # get total log prior density
     def log_prior(self, m):
@@ -117,20 +135,21 @@ class mbPosterior:
         return log_prior
 
     # get log likelihood
-    def log_likelihood(self, m):
-        mb_pred = self.mb_func([*m])
-        return log_normal_density(self.mb_obs, **{'mu': mb_pred, 'sigma': self.sigma_obs})
+    def log_likelihood(self):
+        return log_normal_density(self.mb_obs, **{'mu': self.mb_pred, 'sigma': self.sigma_obs})
     
     # get log potential (sum up as any declared potential functions)
     def log_potential(self, m):
         log_potential = 0
         for potential_function in self.potential_functions:
-            log_potential += potential_function(*m, **{'massbal':self.mb_func([*m])})
+            log_potential += potential_function(*m, **{'massbal':self.mb_pred})
         return log_potential
 
     # get log posterior (sum of log prior, log likelihood and log potential)
     def log_posterior(self, m):
-        return self.log_prior(m) + self.log_likelihood(m) + self.log_potential(m)
+        # anytime log_posterior is called for a new step, calculate the predicted mass balance
+        self.get_mb_pred(m)
+        return self.log_prior(m) + self.log_likelihood() + self.log_potential(m), self.mb_pred
 
 # Metropolis-Hastings Markoc chain Monte Carlo class
 class Metropolis:
@@ -140,12 +159,14 @@ class Metropolis:
         self.P_chain = []
         self.m_chain = []
         self.m_primes = []
+        self.mb_chain = []
+        self.mb_primes = []
         self.means = means
         self.stds = stds
 
     def sample(self, m_0, log_posterior, h=0.1, n_samples=1000, burnin=0, thin_factor=1, progress_bar=False):
         # Compute initial unscaled log-posterior
-        P_0 = log_posterior(inverse_z_normalize(m_0, self.means, self.stds))
+        P_0, mb_0 = log_posterior(inverse_z_normalize(m_0, self.means, self.stds))
 
         n = len(m_0)
 
@@ -164,7 +185,7 @@ class Metropolis:
             self.steps.append(step)
 
             # Compute new unscaled log-posterior
-            P_1 = log_posterior(inverse_z_normalize(m_prime, self.means, self.stds))
+            P_1, mb_prime = log_posterior(inverse_z_normalize(m_prime, self.means, self.stds))
 
             # Compute logarithm of probability ratio
             log_ratio = P_1 - P_0
@@ -177,6 +198,7 @@ class Metropolis:
             if ratio>torch.rand(1):
                 m_0 = m_prime
                 P_0 = P_1
+                mb_0 = mb_prime
 
             # Only append to the chain if we're past burn-in.
             if i>burnin:
@@ -185,8 +207,10 @@ class Metropolis:
                     self.P_chain.append(P_0)
                     self.m_chain.append(m_0)
                     self.m_primes.append(m_prime)
+                    self.mb_chain.append(mb_0)
+                    self.mb_primes.append(mb_prime)
 
-        return torch.vstack(self.m_primes), torch.vstack(self.steps), torch.tensor(self.P_chain), torch.vstack(self.m_chain)
+        return torch.tensor(self.P_chain), torch.vstack(self.m_chain), torch.tensor(self.mb_chain), torch.vstack(self.m_primes), torch.tensor(self.mb_primes), torch.vstack(self.steps)
     
 ### some other useful functions ###
 
@@ -210,30 +234,33 @@ def effective_n(x):
     effective_n : int
         effective sample size
     """
-    # detrend trace using mean to be consistent with statistics
-    # definition of autocorrelation
-    x = np.asarray(x)
-    x = (x - x.mean())
-    # compute autocorrelation (note: only need second half since
-    # they are symmetric)
-    rho = np.correlate(x, x, mode='full')
-    rho = rho[len(rho)//2:]
-    # normalize the autocorrelation values
-    #  note: rho[0] is the variance * n_samples, so this is consistent
-    #  with the statistics definition of autocorrelation on wikipedia
-    # (dividing by n_samples gives you the expected value).
-    rho_norm = rho / rho[0]
-    # Iterate until sum of consecutive estimates of autocorrelation is
-    # negative to avoid issues with the sum being -0.5, which returns an
-    # effective_n of infinity
-    negative_autocorr = False
-    t = 1
-    n = len(x)
-    while not negative_autocorr and (t < n):
-        if not t % 2:
-            negative_autocorr = sum(rho_norm[t-1:t+1]) < 0
-        t += 1
-    return int(n / (1 + 2*rho_norm[1:t].sum()))
+    try:
+        # detrend trace using mean to be consistent with statistics
+        # definition of autocorrelation
+        x = np.asarray(x)
+        x = (x - x.mean())
+        # compute autocorrelation (note: only need second half since
+        # they are symmetric)
+        rho = np.correlate(x, x, mode='full')
+        rho = rho[len(rho)//2:]
+        # normalize the autocorrelation values
+        #  note: rho[0] is the variance * n_samples, so this is consistent
+        #  with the statistics definition of autocorrelation on wikipedia
+        # (dividing by n_samples gives you the expected value).
+        rho_norm = rho / rho[0]
+        # Iterate until sum of consecutive estimates of autocorrelation is
+        # negative to avoid issues with the sum being -0.5, which returns an
+        # effective_n of infinity
+        negative_autocorr = False
+        t = 1
+        n = len(x)
+        while not negative_autocorr and (t < n):
+            if not t % 2:
+                negative_autocorr = sum(rho_norm[t-1:t+1]) < 0
+            t += 1
+        return int(n / (1 + 2*rho_norm[1:t].sum()))
+    except:
+        return None
 
 
 def plot_chain(m_primes, m_chain, P_chain, title, ms=1, fontsize=8):
