@@ -292,12 +292,12 @@ def plot_chain(m_primes, m_chain, P_chain, title, ms=1, fontsize=8):
         else:
             ax.legend(loc='upper left', borderaxespad=0, handlelength=0, fontsize=fontsize)
 
-
     axes[0].add_artist(l0)
     axes[1].add_artist(l1)
     axes[2].add_artist(l2)
     axes[3].add_artist(l3)
     axes[4].add_artist(l4)
+    axes[0].set_xlim([0, m_chain.shape[0]])
     axes[0].set_title(title, fontsize=fontsize)
 
     plt.tight_layout()

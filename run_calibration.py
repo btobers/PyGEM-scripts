@@ -1536,7 +1536,7 @@ def main(list_packed_vars):
                         sampler = mcmc.Metropolis(mb.means, mb.stds)
 
                         # draw samples
-                        m_primes_z, steps, P_chain, m_chain_z = sampler.sample(initial_guesses_z, mb.log_posterior, h=0.1, n_samples=pygem_prms.mcmc_sample_no, burnin=int(pygem_prms.mcmc_burn_pct*pygem_prms.mcmc_sample_no/100), thin_factor=pygem_prms.thin_interval, progress_bar=args.progress_bar)
+                        m_primes_z, steps, P_chain, m_chain_z = sampler.sample(initial_guesses_z, mb.log_posterior, h=0.1, n_samples=pygem_prms.mcmc_sample_no, burnin=int(pygem_prms.mcmc_burn_pct/100*pygem_prms.mcmc_sample_no), thin_factor=pygem_prms.thin_interval, progress_bar=args.progress_bar)
 
                         # inverse z-normalize the samples to original parameter space
                         m_chain = mcmc.inverse_z_normalize(m_chain_z, mb.means, mb.stds)
@@ -1556,8 +1556,8 @@ def main(list_packed_vars):
 
                         # Store data from model to be exported
                         chain_str = 'chain_' + str(n_chain)
-                        modelprms_export['kp'][chain_str] = m_chain[:,0].tolist()
                         modelprms_export['tbias'][chain_str] = m_chain[:,1].tolist()
+                        modelprms_export['kp'][chain_str] = m_chain[:,1].tolist()
                         modelprms_export['ddfsnow'][chain_str] = m_chain[:,2].tolist()
                         modelprms_export['ddfice'][chain_str] = (m_chain[:,2] /
                                                                   pygem_prms.ddfsnow_iceratio).tolist()
