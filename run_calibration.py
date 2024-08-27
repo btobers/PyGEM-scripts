@@ -166,18 +166,17 @@ class massbalEmulator:
         torch.set_num_threads(1)
 
         state_dict = torch.load(em_mod_path, weights_only=False)
-        
         emulator_extra_fp = em_mod_path.replace('.pth', '_extra.pkl')
         with open(emulator_extra_fp, 'rb') as f:
             emulator_extra_dict = pickle.load(f)
-        
-        X_train = emulator_extra_dict['X_train']
-        X_mean = emulator_extra_dict['X_mean']
-        X_std = emulator_extra_dict['X_std']
-        y_train = emulator_extra_dict['y_train']
-        y_mean = emulator_extra_dict['y_mean']
-        y_std = emulator_extra_dict['y_std']
-        
+        # convert lists to torch tensors
+        X_train = torch.stack([torch.tensor(lst) for lst in emulator_extra_dict['X_train']], dim=1)
+        X_mean = torch.tensor(emulator_extra_dict['X_mean'])
+        X_std = torch.tensor(emulator_extra_dict['X_std'])
+        y_train = torch.tensor(emulator_extra_dict['y_train'])
+        y_mean = torch.tensor(emulator_extra_dict['y_mean'])
+        y_std = torch.tensor(emulator_extra_dict['y_std'])
+    
         # initialize likelihood and model
         likelihood = gpytorch.likelihoods.GaussianLikelihood()
         
@@ -362,13 +361,13 @@ def create_emulator(glacier_str, sims_df, y_cn,
     if not os.path.exists(em_mod_fp):
         os.makedirs(em_mod_fp, exist_ok=True)
     torch.save(model.state_dict(), em_mod_fp + em_mod_fn)
-    # Extra required datasets
-    em_extra_dict = {'X_train': X_train,
-                        'X_mean': X_mean,
-                        'X_std': X_std,
-                        'y_train': y_train,
-                        'y_mean': y_mean,
-                        'y_std': y_std}
+    # Extra required datasets (convert to lists to avoid any serialization issues with torch tensors)
+    em_extra_dict = {'X_train': [X.tolist() for X in X_train.T],
+                        'X_mean': [X.tolist() for X in X_mean.T],
+                        'X_std': [X.tolist() for X in X_std.T],
+                        'y_train': y_train.tolist(),
+                        'y_mean': float(y_mean),
+                        'y_std': float(y_std)}
     em_extra_fn = em_mod_fn.replace('.pth','_extra.pkl')
     with open(em_mod_fp + em_extra_fn, 'wb') as f:
         pickle.dump(em_extra_dict, f)
@@ -1468,7 +1467,7 @@ def main(list_packed_vars):
                     for n_chain in range(0,pygem_prms.n_chains):
     
                         if debug:
-                            print('\n', glacier_str, ' chain' + str(n_chain))
+                            print('\n', glacier_str, ' chain ' + str(n_chain))
     
                         if n_chain == 0:
                             # Starting values: middle
