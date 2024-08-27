@@ -1556,7 +1556,7 @@ def main(list_packed_vars):
 
                         # Store data from model to be exported
                         chain_str = 'chain_' + str(n_chain)
-                        modelprms_export['tbias'][chain_str] = m_chain[:,1].tolist()
+                        modelprms_export['tbias'][chain_str] = m_chain[:,0].tolist()
                         modelprms_export['kp'][chain_str] = m_chain[:,1].tolist()
                         modelprms_export['ddfsnow'][chain_str] = m_chain[:,2].tolist()
                         modelprms_export['ddfice'][chain_str] = (m_chain[:,2] /
