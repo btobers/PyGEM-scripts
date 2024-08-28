@@ -1184,8 +1184,8 @@ def main(list_packed_vars):
                     modelprms_export[k] = {}
 
                 # ===== RUNNING MCMC =====
-                # try:
-                for batman in [0]:
+                try:
+                # for batman in [0]:
 
                     ### loop over chains, adjust initial guesses accordingly ###
                     for n_chain in range(0,pygem_prms.n_chains):
@@ -1427,15 +1427,15 @@ def main(list_packed_vars):
                     with open(mcmc_good_fp + txt_fn_good, "w") as text_file:
                         text_file.write(glacier_str + ' successfully exported mcmc results')
                 
-                # except:
-                #     # MCMC LOG FAILURE
-                #     mcmc_fail_fp = pygem_prms.output_filepath + f'mcmc_fail{outpath_sfix}/' + glacier_str.split('.')[0].zfill(2) + '/'
-                #     if not os.path.exists(mcmc_fail_fp):
-                #         os.makedirs(mcmc_fail_fp, exist_ok=True)
-                #     print(mcmc_fail_fp)
-                #     txt_fn_fail = glacier_str + "-mcmc_fail.txt"
-                #     with open(mcmc_fail_fp + txt_fn_fail, "w") as text_file:
-                #         text_file.write(glacier_str + ' failed to complete MCMC')
+                except:
+                    # MCMC LOG FAILURE
+                    mcmc_fail_fp = pygem_prms.output_filepath + f'mcmc_fail{outpath_sfix}/' + glacier_str.split('.')[0].zfill(2) + '/'
+                    if not os.path.exists(mcmc_fail_fp):
+                        os.makedirs(mcmc_fail_fp, exist_ok=True)
+                    print(mcmc_fail_fp)
+                    txt_fn_fail = glacier_str + "-mcmc_fail.txt"
+                    with open(mcmc_fail_fp + txt_fn_fail, "w") as text_file:
+                        text_file.write(glacier_str + ' failed to complete MCMC')
 
 
             #%% ===== HUSS AND HOCK (2015) CALIBRATION =====
