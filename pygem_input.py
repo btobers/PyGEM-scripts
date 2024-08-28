@@ -80,7 +80,7 @@ if hindcast:
 
 
 #%% ===== CALIBRATION OPTIONS =====
-# Calibration option ('emulator', 'MCMC', 'MCMC_fullsim' 'HH2015', 'HH2015mod', None)
+# Calibration option ('emulator', 'MCMC' 'HH2015', 'HH2015mod', None)
 option_calibration = 'MCMC'
 
 # Prior distribution (specify filename or set equal to None)
@@ -139,17 +139,18 @@ elif option_calibration == 'emulator':
     ftol_opt = 1e-6                 # tolerance for SciPy optimization scheme
     eps_opt = 0.01                  # epsilon (adjust variables for jacobian) for SciPy optimization scheme
     
-elif option_calibration in ['MCMC', 'MCMC_fullsim']:
+elif option_calibration in ['MCMC']:
+    option_use_emulator = False      # use emulator or full model
     emulator_fp = output_filepath + 'emulator/'
     emulator_sims = 100
-    tbias_step = 1
-    tbias_stepsmall = 0.1
+    tbias_step = 0.5
+    tbias_stepsmall = 0.05
     option_areaconstant = True      # Option to keep area constant or evolve
     # Chain options
-    n_chains = 3                    # number of chains (min 1, max 3)
-    mcmc_sample_no = 10000         # number of steps (10000 was found to be sufficient in HMA)
+    n_chains = 1                    # number of chains (min 1, max 3)
+    mcmc_sample_no = 10000          # number of steps (10000 was found to be sufficient in HMA)
     mcmc_burn_pct = 2               # percentage of steps to burn-in (0 records all steps in chain)
-    mcmc_step = None                # step option (None or 'am')
+    mcmc_step = 0.5                 # mcmc step size (in terms of standard deviation)
     thin_interval = 10              # thin interval if need to reduce file size (best to leave at 1 if space allows)
     # Degree-day factor of snow distribution options
     ddfsnow_disttype = 'truncnormal'# distribution type ('truncnormal', 'uniform')

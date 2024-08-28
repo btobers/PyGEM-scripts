@@ -17,7 +17,7 @@ from scipy.optimize import minimize
 from scipy import stats
 import pygem
 import pygem_input as pygem_prms
-import mcmc
+from pygem import mcmc
 from pygem import class_climate
 from pygem.massbalance import PyGEMMassBalance
 #from pygem.glacierdynamics import MassRedistributionCurveModel
@@ -1226,7 +1226,7 @@ def main(list_packed_vars):
                             modelprms['ddfsnow'] = ddfsnow_start
                             modelprms['ddfice'] = modelprms['ddfsnow'] / pygem_prms.ddfsnow_iceratio
                             # Tbias lower bound based on some bins having negative climatic mass balance
-                            modelprms['tbias'] =  (-1 * (gdir.historical_climate['temp'] + gdir.historical_climate['lr'] *
+                            modelprms['tbias'] = (-1 * (gdir.historical_climate['temp'] + gdir.historical_climate['lr'] *
                                             (fls[0].surface_h.min() - gdir.historical_climate['elev'])).max())
                             nbinyears_negmbclim, mb_mwea = mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=fls,
                                                                         return_tbias_mustmelt_wmb=True)
@@ -1353,12 +1353,19 @@ def main(list_packed_vars):
                         # compile initial guesses and standardize by standard deviations
                         initial_guesses = torch.tensor([modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow']]).flatten()
                         initial_guesses_z = mcmc.z_normalize(initial_guesses, mb.means, mb.stds)
-                        
+
                         # instantiate sampler
                         sampler = mcmc.Metropolis(mb.means, mb.stds)
 
                         # draw samples
-                        P_chain, m_chain_z, mb_chain, m_primes_z, mb_primes, steps = sampler.sample(initial_guesses_z, mb.log_posterior, h=0.1, n_samples=pygem_prms.mcmc_sample_no, burnin=int(pygem_prms.mcmc_burn_pct/100*pygem_prms.mcmc_sample_no), thin_factor=pygem_prms.thin_interval, progress_bar=args.progress_bar)
+                        P_chain, m_chain_z, mb_chain, m_primes_z, mb_primes, steps = sampler.sample(initial_guesses_z, 
+                                                                                                    mb.log_posterior, 
+                                                                                                    h=pygem_prms.mcmc_step, 
+                                                                                                    n_samples=pygem_prms.mcmc_sample_no, 
+                                                                                                    burnin=int(pygem_prms.mcmc_burn_pct/100*pygem_prms.mcmc_sample_no), 
+                                                                                                    thin_factor=pygem_prms.thin_interval, 
+                                                                                                    progress_bar=args.progress_bar)
+
                         # inverse z-normalize the samples to original parameter space
                         m_chain = mcmc.inverse_z_normalize(m_chain_z, mb.means, mb.stds)
                         m_primes = mcmc.inverse_z_normalize(m_primes_z, mb.means, mb.stds)
