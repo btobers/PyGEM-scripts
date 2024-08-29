@@ -68,14 +68,14 @@ def getparser():
                         help='reference gcm name')
     parser.add_argument('-rgi_glac_number_fn', action='store', type=str, default=None,
                         help='Filename containing list of rgi_glac_number, helpful for running batches on spc')
-    parser.add_argument('-rgi_glac_number', action='store', type=str, default=None,
+    parser.add_argument('-rgi_glac_number', action='store', type=str, default=pygem_prms.glac_no,
                         help='rgi glacier number for supercomputer')
     parser.add_argument('-num_simultaneous_processes', action='store', type=int, default=1,
                         help='number of simultaneous processes (cores) to use (default is 1, ie. no parallelization)')
     # flags
-    parser.add_argument('-progress_bar', action='store_true',
+    parser.add_argument('-p', '--progress_bar', action='store_true',
                         help='Flag to show progress bar')
-    parser.add_argument('-debug', action='store_true',
+    parser.add_argument('-v', '--debug', action='store_true',
                         help='Flag for debugging')
     return parser
 
@@ -1184,8 +1184,8 @@ def main(list_packed_vars):
                     modelprms_export[k] = {}
 
                 # ===== RUNNING MCMC =====
-                try:
-                # for batman in [0]:
+                # try:
+                for batman in [0]:
 
                     ### loop over chains, adjust initial guesses accordingly ###
                     for n_chain in range(0,pygem_prms.n_chains):
@@ -1313,7 +1313,7 @@ def main(list_packed_vars):
                         else:
                             mb_mwea_start = mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=fls)
                         while mb_mwea_start < mb_max_loss:
-                            modelprms['tbias'] = modelprms['tbias'] - tbias_step
+                            modelprms['tbias'] = modelprms['tbias'] - pygem_prms.tbias_step
                             if pygem_prms.option_use_emulator:
                                 mb_mwea_start = mbEmulator.eval([modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow']])
                             else:
@@ -1321,9 +1321,8 @@ def main(list_packed_vars):
 
                         # check melting occurs for starting conditions
                         mb_total_minelev_start = calc_mb_total_minelev(modelprms)
-                        tbias_smallstep = 0.01
                         while mb_total_minelev_start > 0 and mb_mwea_start > mb_max_loss:
-                            modelprms['tbias'] = modelprms['tbias'] + tbias_smallstep
+                            modelprms['tbias'] = modelprms['tbias'] + pygem_prms.tbias_smallstep
                             mb_total_minelev_start = calc_mb_total_minelev(modelprms)
                             if pygem_prms.option_use_emulator:
                                 mb_mwea_start = mbEmulator.eval([modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow']])
@@ -1427,15 +1426,15 @@ def main(list_packed_vars):
                     with open(mcmc_good_fp + txt_fn_good, "w") as text_file:
                         text_file.write(glacier_str + ' successfully exported mcmc results')
                 
-                except:
-                    # MCMC LOG FAILURE
-                    mcmc_fail_fp = pygem_prms.output_filepath + f'mcmc_fail{outpath_sfix}/' + glacier_str.split('.')[0].zfill(2) + '/'
-                    if not os.path.exists(mcmc_fail_fp):
-                        os.makedirs(mcmc_fail_fp, exist_ok=True)
-                    print(mcmc_fail_fp)
-                    txt_fn_fail = glacier_str + "-mcmc_fail.txt"
-                    with open(mcmc_fail_fp + txt_fn_fail, "w") as text_file:
-                        text_file.write(glacier_str + ' failed to complete MCMC')
+                # except:
+                #     # MCMC LOG FAILURE
+                #     mcmc_fail_fp = pygem_prms.output_filepath + f'mcmc_fail{outpath_sfix}/' + glacier_str.split('.')[0].zfill(2) + '/'
+                #     if not os.path.exists(mcmc_fail_fp):
+                #         os.makedirs(mcmc_fail_fp, exist_ok=True)
+                #     print(mcmc_fail_fp)
+                #     txt_fn_fail = glacier_str + "-mcmc_fail.txt"
+                #     with open(mcmc_fail_fp + txt_fn_fail, "w") as text_file:
+                #         text_file.write(glacier_str + ' failed to complete MCMC')
 
 
             #%% ===== HUSS AND HOCK (2015) CALIBRATION =====
@@ -1935,11 +1934,11 @@ if __name__ == '__main__':
 #        cfg.BASENAMES['pygem_modelprms'] = ('pygem_modelprms.pkl', 'PyGEM model parameters')
 
     # RGI glacier number
-    if args.rgi_glac_number_fn is not None:
+    if args.rgi_glac_number:
+        glac_no = [args.rgi_glac_number]
+    elif args.rgi_glac_number_fn is not None:
         with open(args.rgi_glac_number_fn, 'rb') as f:
             glac_no = pickle.load(f)
-    elif pygem_prms.glac_no is not None:
-        glac_no = pygem_prms.glac_no
     else:
         main_glac_rgi_all = modelsetup.selectglaciersrgitable(
                 rgi_regionsO1=pygem_prms.rgi_regionsO1, rgi_regionsO2=pygem_prms.rgi_regionsO2,

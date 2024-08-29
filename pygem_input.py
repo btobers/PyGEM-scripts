@@ -143,7 +143,7 @@ elif option_calibration in ['MCMC']:
     option_use_emulator = True      # use emulator or full model
     emulator_fp = output_filepath + 'emulator/'
     emulator_sims = 100
-    tbias_step = 0.5
+    tbias_step = 0.1
     tbias_stepsmall = 0.05
     option_areaconstant = True      # Option to keep area constant or evolve
     # Chain options
