@@ -23,13 +23,15 @@ from pygem.massbalance import PyGEMMassBalance
 #from pygem.glacierdynamics import MassRedistributionCurveModel
 from pygem.oggm_compat import single_flowline_glacier_directory, single_flowline_glacier_directory_with_calving
 import pygem.pygem_modelsetup as modelsetup
-from pygem.shop import debris, mbdata, icethickness
+from pygem.shop import debris, mbdata, icethickness, surfelev
 
-#from oggm import cfg
-#from oggm import graphics
-#from oggm import tasks
-#from oggm import utils
+from oggm import cfg
+from oggm import graphics
+from oggm import tasks
+from oggm import utils
 from oggm import workflow
+from oggm.core.flowline import FluxBasedModel
+from oggm.core.massbalance import apparent_mb_from_any_mb
 #from oggm.core import climate
 #from oggm.core.flowline import FluxBasedModel
 #from oggm.core.inversion import calving_flux_from_depth
@@ -67,8 +69,8 @@ def getparser():
     parser.add_argument('-ref_gcm_name', action='store', type=str, default=pygem_prms.ref_gcm_name,
                         help='reference gcm name')
     parser.add_argument('-rgi_glac_number_fn', action='store', type=str, default=None,
-                        help='Filename containing list of rgi_glac_number, helpful for running batches on spc')
-    parser.add_argument('-rgi_glac_number', action='store', type=str, default=pygem_prms.glac_no,
+                        help='Filename containing list of rgi_glac_number, helpful for running batches on spc'),
+    parser.add_argument('-rgi_glac_number', action='store', type=str, default=pygem_prms.glac_no, nargs='+',
                         help='rgi glacier number for supercomputer')
     parser.add_argument('-num_simultaneous_processes', action='store', type=int, default=1,
                         help='number of simultaneous processes (cores) to use (default is 1, ie. no parallelization)')
@@ -121,6 +123,142 @@ def mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=None, t1=None, t2=None,
         nyears = gdir.mbdata['nyears']
         mb_mwea = mbmod.glac_wide_massbaltotal[t1_idx:t2_idx+1].sum() / mbmod.glac_wide_area_annual[0] / nyears
         return mb_mwea
+
+
+def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=None, fs=None, debug=False):
+    """
+    Run the ice thickness inversion and mass balance model to get binned annual ice thickness evolution
+    """
+    if debug:
+        print(f'binned_mb_calc() modelprms: {modelprms}')
+    nyears = int(gdir.dates_table.shape[0]/12) # number of years from dates table
+    # perform OGGM ice thickness inversion
+    if not gdir.is_tidewater or not pygem_prms.include_calving:
+        # Perform inversion based on PyGEM MB using reference directory
+        mbmod_inv = PyGEMMassBalance(gdir, modelprms, glacier_rgi_table,
+                                        hindcast=pygem_prms.hindcast,
+                                        debug=pygem_prms.debug_mb,
+                                        debug_refreeze=pygem_prms.debug_refreeze,
+                                        fls=fls, option_areaconstant=True,
+                                        inversion_filter=pygem_prms.include_debris)
+        # Arbitrariliy shift the MB profile up (or down) until mass balance is zero (equilibrium for inversion)
+        apparent_mb_from_any_mb(gdir, mb_years=np.arange(nyears), mb_model=mbmod_inv)
+        tasks.prepare_for_inversion(gdir)
+        tasks.mass_conservation_inversion(gdir, glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs)
+        tasks.init_present_time_glacier(gdir) # adds bins below
+        debris.debris_binned(gdir, fl_str='model_flowlines') # add debris enhancement factors to flowlines
+        try:
+            nfls = gdir.read_pickle('model_flowlines')
+        except FileNotFoundError as e:
+            if 'model_flowlines.pkl' in str(e):
+                tasks.compute_downstream_line(gdir)
+                tasks.compute_downstream_bedshape(gdir)
+                tasks.init_present_time_glacier(gdir) # adds bins below
+                nfls = gdir.read_pickle('model_flowlines')
+            else:
+                raise
+
+        # Check that water level is within given bounds
+        cls = gdir.read_pickle('inversion_input')[-1]
+        th = cls['hgt'][-1]
+        vmin, vmax = cfg.PARAMS['free_board_marine_terminating']
+        water_level = utils.clip_scalar(0, th - vmax, th - vmin) 
+        # mass balance model with evolving area
+        mbmod = PyGEMMassBalance(gdir, modelprms, glacier_rgi_table,
+                                    hindcast=pygem_prms.hindcast,
+                                    debug=pygem_prms.debug_mb,
+                                    debug_refreeze=pygem_prms.debug_refreeze,
+                                    fls=nfls, option_areaconstant=False)
+        
+        # glacier dynamics model
+        ev_model = FluxBasedModel(nfls, y0=0, mb_model=mbmod, 
+                                    glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs,
+                                    is_tidewater=gdir.is_tidewater,
+                                    water_level=water_level
+                                    )
+
+        # run glacier dynamics model forward
+        ev_model.run_until_and_store(nyears)
+
+        t1_idx = gdir.mbdata['t1_idx']
+        t2_idx = gdir.mbdata['t2_idx']
+        nyears = gdir.mbdata['nyears']
+        mb_mwea = mbmod.glac_wide_massbaltotal[t1_idx:t2_idx+1].sum() / mbmod.glac_wide_area_annual[0] / nyears
+
+
+        # Update the latest thickness
+        if ev_model is not None:
+            fl_widths_m = getattr(ev_model.fls[0], 'widths_m', None)
+            fl_section = getattr(ev_model.fls[0],'section',None)
+        else:
+            fl_widths_m = getattr(nfls[0], 'widths_m', None)
+            fl_section = getattr(nfls[0],'section',None)
+        if fl_section is not None and fl_widths_m is not None:                                
+            # thickness
+            icethickness_t0 = np.zeros(fl_section.shape)
+            icethickness_t0[fl_widths_m > 0] = fl_section[fl_widths_m > 0] / fl_widths_m[fl_widths_m > 0]
+            mbmod.glac_bin_icethickness_annual[:,-1] = icethickness_t0
+
+        if debug:
+            print(f'specific mass balance = {np.round(mb_mwea,2)} mwea')
+        return nfls[0].surface_h, mbmod.glac_bin_massbalclim, mbmod.glac_bin_icethickness_annual, mb_mwea
+
+
+def get_bin_thick_monthly(bin_massbalclim_monthly, bin_thick_annual):
+    """
+    funciton to calculate the monthly binned ice thickness
+    from annual climatic mass balance and annual ice thickness
+
+    monthly binned ice thickness is determined assuming 
+    the flux divergence is constant throughout the year.
+
+    Inputs
+    ----------
+    bin_massbalclim_monthly : float
+        ndarray containing the climatic mass balance for each model month computed by PyGEM
+        shape : [#elevbins, #months]
+    bin_thick_annual : float
+        ndarray containing the average (or median) binned ice thickness at computed by PyGEM
+        shape : [#elevbins, #years]
+
+    Outputs
+    -------
+    bin_thick_monthly: float
+        ndarray containing the binned monthly ice thickness
+        shape : [#elevbins, #months]
+    """
+    # get annual climatic mass balance from monthly climatic mass balance - requires reshaping monthly binned values and summing every 12 months
+    bin_massbalclim_annual = bin_massbalclim_monthly.reshape(bin_massbalclim_monthly.shape[0],bin_massbalclim_monthly.shape[1]//12,-1).sum(2)
+
+    # bin_thick_annual = bin_thick_annual[:,:-1]
+    # get change in thickness from previous year for each elevation bin
+    delta_thick_annual = np.diff(bin_thick_annual, axis=-1)
+
+    # get annual binned flux divergence as annual binned climatic mass balance (-) annual binned ice thickness
+    # account for density contrast (convert climatic mass balance in m w.e. to m ice)
+    flux_div_annual =   (
+                (bin_massbalclim_annual * 
+                (pygem_prms.density_ice / 
+                pygem_prms.density_water)) - 
+                delta_thick_annual)
+
+    # we'll assume the flux divergence is constant througohut the year (is this a good assumption?)
+    # ie. take annual values and divide by 12 - repeat monthly values across 12 months
+    flux_div_monthly = np.repeat(flux_div_annual / 12, 12, axis=1)
+
+    # get monthly binned change in thickness assuming constant flux divergence throughout the year
+    # account for density contrast (convert monthly climatic mass balance in m w.e. to m ice)
+    delta_thick_monthly =   (
+                (bin_massbalclim_monthly * 
+                (pygem_prms.density_ice / 
+                pygem_prms.density_water)) - 
+                flux_div_monthly)
+
+    # get binned monthly thickness = running thickness change + initial thickness
+    running_delta_thick_monthly = np.cumsum(delta_thick_monthly, axis=-1)
+    bin_thick_monthly =  running_delta_thick_monthly + bin_thick_annual[:,0][:,np.newaxis] 
+
+    return bin_thick_monthly
 
 
 # class for Gaussian Process model for mass balance emulator
@@ -526,6 +664,28 @@ def main(list_packed_vars):
             
         if debug:
             assert os.path.exists(gdir.get_filepath('mb_obs')), 'Mass balance data missing. Check dataset and column names'
+
+
+        # oib deltah data
+        if pygem_prms.opt_calib_binned_dh:
+            # try:
+            # get rgi7id to load oib data
+            oib_dict = surfelev.load_oib(surfelev.get_rgi7id(glacier_str, debug=debug))
+            # get oib diffs
+            oib_centers, oib_area, oib_diffs, oib_dates = surfelev.get_oib_diffs(oib_dict=oib_dict, aggregate=100, debug=debug)
+            # only retain diffs for survey dates within model timespan
+            _, oib_inds, pygem_inds = np.intersect1d(oib_dates.to_numpy(), gdir.dates_table.date.to_numpy(), return_indices=True)
+            oib_diffs = oib_diffs[:,oib_inds]
+            oib_dates = oib_dates[oib_inds]
+            # double difference to remove the COP30 signal from the relative OIB surface elevation changes
+            oib_dbldiffs = np.diff(oib_diffs,axis=1)
+            gdir.deltah = {
+                            'timstamps': oib_dates,
+                            'bin_center':oib_centers,
+                            'bin_area':oib_area,
+                            'dh':oib_dbldiffs,
+                           }
+
 
         # ----- CALIBRATION OPTIONS ------
         if (fls is not None) and (gdir.mbdata is not None) and (glacier_area.sum() > 0):
@@ -1935,7 +2095,7 @@ if __name__ == '__main__':
 
     # RGI glacier number
     if args.rgi_glac_number:
-        glac_no = [args.rgi_glac_number]
+        glac_no = args.rgi_glac_number
     elif args.rgi_glac_number_fn is not None:
         with open(args.rgi_glac_number_fn, 'rb') as f:
             glac_no = pickle.load(f)
