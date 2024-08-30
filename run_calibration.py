@@ -1322,7 +1322,7 @@ def main(list_packed_vars):
                         # check melting occurs for starting conditions
                         mb_total_minelev_start = calc_mb_total_minelev(modelprms)
                         while mb_total_minelev_start > 0 and mb_mwea_start > mb_max_loss:
-                            modelprms['tbias'] = modelprms['tbias'] + pygem_prms.tbias_smallstep
+                            modelprms['tbias'] = modelprms['tbias'] + pygem_prms.tbias_stepsmall
                             mb_total_minelev_start = calc_mb_total_minelev(modelprms)
                             if pygem_prms.option_use_emulator:
                                 mb_mwea_start = mbEmulator.eval([modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow']])
