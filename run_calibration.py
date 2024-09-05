@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import math
+import warnings
 # External libraries
 import pandas as pd
 import pickle
@@ -125,12 +126,11 @@ def mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=None, t1=None, t2=None,
         return mb_mwea
 
 
-def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=None, fs=None, debug=False):
+def get_binned_dh(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=None, fs=None, time_inds=None, bin_edges=None, debug=False):
     """
     Run the ice thickness inversion and mass balance model to get binned annual ice thickness evolution
+    Convert to monthly thickness by assuming that the flux divergence is constant throughout the year
     """
-    if debug:
-        print(f'binned_mb_calc() modelprms: {modelprms}')
     nyears = int(gdir.dates_table.shape[0]/12) # number of years from dates table
     # perform OGGM ice thickness inversion
     if not gdir.is_tidewater or not pygem_prms.include_calving:
@@ -141,6 +141,7 @@ def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multipli
                                         debug_refreeze=pygem_prms.debug_refreeze,
                                         fls=fls, option_areaconstant=True,
                                         inversion_filter=pygem_prms.include_debris)
+        
         # Arbitrariliy shift the MB profile up (or down) until mass balance is zero (equilibrium for inversion)
         apparent_mb_from_any_mb(gdir, mb_years=np.arange(nyears), mb_model=mbmod_inv)
         tasks.prepare_for_inversion(gdir)
@@ -174,17 +175,15 @@ def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multipli
         ev_model = FluxBasedModel(nfls, y0=0, mb_model=mbmod, 
                                     glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs,
                                     is_tidewater=gdir.is_tidewater,
-                                    water_level=water_level
-                                    )
+                                    water_level=water_level)
+        
+        try:
+            # run glacier dynamics model forward
+            ev_model.run_until_and_store(nyears)
+            mb_mwea = mbmod.glac_wide_massbaltotal[gdir.mbdata['t1_idx']:gdir.mbdata['t2_idx']+1].sum() / mbmod.glac_wide_area_annual[0] / nyears
 
-        # run glacier dynamics model forward
-        ev_model.run_until_and_store(nyears)
-
-        t1_idx = gdir.mbdata['t1_idx']
-        t2_idx = gdir.mbdata['t2_idx']
-        nyears = gdir.mbdata['nyears']
-        mb_mwea = mbmod.glac_wide_massbaltotal[t1_idx:t2_idx+1].sum() / mbmod.glac_wide_area_annual[0] / nyears
-
+        except RuntimeError:
+            return np.nan, np.nan
 
         # Update the latest thickness
         if ev_model is not None:
@@ -199,66 +198,46 @@ def binned_mb_calc(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multipli
             icethickness_t0[fl_widths_m > 0] = fl_section[fl_widths_m > 0] / fl_widths_m[fl_widths_m > 0]
             mbmod.glac_bin_icethickness_annual[:,-1] = icethickness_t0
 
-        if debug:
-            print(f'specific mass balance = {np.round(mb_mwea,2)} mwea')
-        return nfls[0].surface_h, mbmod.glac_bin_massbalclim, mbmod.glac_bin_icethickness_annual, mb_mwea
+        # get annual climatic mass balance from monthly climatic mass balance - requires reshaping monthly binned values and summing every 12 months
+        bin_massbalclim_annual = mbmod.glac_bin_massbalclim.reshape(mbmod.glac_bin_massbalclim.shape[0],mbmod.glac_bin_massbalclim.shape[1]//12,-1).sum(2)
 
+        # bin_thick_annual = bin_thick_annual[:,:-1]
+        # get change in thickness from previous year for each elevation bin
+        delta_thick_annual = np.diff(mbmod.glac_bin_icethickness_annual, axis=-1)
 
-def get_bin_thick_monthly(bin_massbalclim_monthly, bin_thick_annual):
-    """
-    funciton to calculate the monthly binned ice thickness
-    from annual climatic mass balance and annual ice thickness
+        # get annual binned flux divergence as annual binned climatic mass balance (-) annual binned ice thickness
+        # account for density contrast (convert climatic mass balance in m w.e. to m ice)
+        flux_div_annual =   (
+                    (bin_massbalclim_annual * 
+                    (pygem_prms.density_ice / 
+                    pygem_prms.density_water)) - 
+                    delta_thick_annual)
 
-    monthly binned ice thickness is determined assuming 
-    the flux divergence is constant throughout the year.
+        # we'll assume the flux divergence is constant througohut the year (is this a good assumption?)
+        # ie. take annual values and divide by 12 - repeat monthly values across 12 months
+        flux_div_monthly = np.repeat(flux_div_annual / 12, 12, axis=1)
 
-    Inputs
-    ----------
-    bin_massbalclim_monthly : float
-        ndarray containing the climatic mass balance for each model month computed by PyGEM
-        shape : [#elevbins, #months]
-    bin_thick_annual : float
-        ndarray containing the average (or median) binned ice thickness at computed by PyGEM
-        shape : [#elevbins, #years]
+        # get monthly binned change in thickness assuming constant flux divergence throughout the year
+        # account for density contrast (convert monthly climatic mass balance in m w.e. to m ice)
+        delta_thick_monthly =   (
+                    (mbmod.glac_bin_massbalclim * 
+                    (pygem_prms.density_ice / 
+                    pygem_prms.density_water)) - 
+                    flux_div_monthly)
 
-    Outputs
-    -------
-    bin_thick_monthly: float
-        ndarray containing the binned monthly ice thickness
-        shape : [#elevbins, #months]
-    """
-    # get annual climatic mass balance from monthly climatic mass balance - requires reshaping monthly binned values and summing every 12 months
-    bin_massbalclim_annual = bin_massbalclim_monthly.reshape(bin_massbalclim_monthly.shape[0],bin_massbalclim_monthly.shape[1]//12,-1).sum(2)
+        # get binned monthly thickness = running thickness change + initial thickness
+        running_delta_thick_monthly = np.cumsum(delta_thick_monthly, axis=-1)
+        bin_thick =  running_delta_thick_monthly + mbmod.glac_bin_icethickness_annual[:,0][:,np.newaxis]
+        # only retain specified time steps
+        bin_thick = bin_thick[:,time_inds]
 
-    # bin_thick_annual = bin_thick_annual[:,:-1]
-    # get change in thickness from previous year for each elevation bin
-    delta_thick_annual = np.diff(bin_thick_annual, axis=-1)
+        # aggregate model bin thicknesses as desired
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore')
+            y_pred = np.column_stack([stats.binned_statistic(x=nfls[0].surface_h, values=x, statistic=np.nanmean, bins=bin_edges)[0] for x in bin_thick.T])
+        binned_dh = np.diff(y_pred,axis=1)
 
-    # get annual binned flux divergence as annual binned climatic mass balance (-) annual binned ice thickness
-    # account for density contrast (convert climatic mass balance in m w.e. to m ice)
-    flux_div_annual =   (
-                (bin_massbalclim_annual * 
-                (pygem_prms.density_ice / 
-                pygem_prms.density_water)) - 
-                delta_thick_annual)
-
-    # we'll assume the flux divergence is constant througohut the year (is this a good assumption?)
-    # ie. take annual values and divide by 12 - repeat monthly values across 12 months
-    flux_div_monthly = np.repeat(flux_div_annual / 12, 12, axis=1)
-
-    # get monthly binned change in thickness assuming constant flux divergence throughout the year
-    # account for density contrast (convert monthly climatic mass balance in m w.e. to m ice)
-    delta_thick_monthly =   (
-                (bin_massbalclim_monthly * 
-                (pygem_prms.density_ice / 
-                pygem_prms.density_water)) - 
-                flux_div_monthly)
-
-    # get binned monthly thickness = running thickness change + initial thickness
-    running_delta_thick_monthly = np.cumsum(delta_thick_monthly, axis=-1)
-    bin_thick_monthly =  running_delta_thick_monthly + bin_thick_annual[:,0][:,np.newaxis] 
-
-    return bin_thick_monthly
+        return mb_mwea, binned_dh
 
 
 # class for Gaussian Process model for mass balance emulator
@@ -668,23 +647,40 @@ def main(list_packed_vars):
 
         # oib deltah data
         if pygem_prms.opt_calib_binned_dh:
-            # try:
-            # get rgi7id to load oib data
-            oib_dict = surfelev.load_oib(surfelev.get_rgi7id(glacier_str, debug=debug))
-            # get oib diffs
-            oib_centers, oib_area, oib_diffs, oib_dates = surfelev.get_oib_diffs(oib_dict=oib_dict, aggregate=100, debug=debug)
-            # only retain diffs for survey dates within model timespan
-            _, oib_inds, pygem_inds = np.intersect1d(oib_dates.to_numpy(), gdir.dates_table.date.to_numpy(), return_indices=True)
-            oib_diffs = oib_diffs[:,oib_inds]
-            oib_dates = oib_dates[oib_inds]
-            # double difference to remove the COP30 signal from the relative OIB surface elevation changes
-            oib_dbldiffs = np.diff(oib_diffs,axis=1)
-            gdir.deltah = {
-                            'timstamps': oib_dates,
-                            'bin_center':oib_centers,
-                            'bin_area':oib_area,
-                            'dh':oib_dbldiffs,
-                           }
+            try:
+                # get rgi7id to load oib data
+                rgi7id = surfelev.get_rgi7id(glacier_str, debug=debug)
+                if rgi7id:
+                    oib_dict = surfelev.load_oib(surfelev.get_rgi7id(glacier_str, debug=debug))
+                    # get oib diffs
+                    bin_edges, bin_area, bin_diffs, dates = surfelev.get_oib_diffs(oib_dict=oib_dict, aggregate=100, debug=debug)
+                    # only retain diffs for survey dates within model timespan
+                    _, oib_inds, pygem_inds = np.intersect1d(dates.to_numpy(), gdir.dates_table.date.to_numpy(), return_indices=True)
+                    bin_diffs = bin_diffs[:,oib_inds]
+                    dates = dates[oib_inds]
+                    # double difference to remove the COP30 signal from the relative OIB surface elevation changes
+                    dbldiffs = np.diff(bin_diffs,axis=1)
+                    gdir.deltah = {
+                                    'timstamps': dates,
+                                    'bin_edges':bin_edges,
+                                    'bin_area':bin_area,
+                                    'dh':dbldiffs,
+                                }
+                    
+                    # get glen_a
+                    if pygem_prms.use_reg_glena:
+                        glena_df = pd.read_csv(pygem_prms.glena_reg_fullfn)                    
+                        glena_O1regions = [int(x) for x in glena_df.O1Region.values]
+                        assert glacier_rgi_table.O1Region in glena_O1regions, ' O1 region not in glena_df'
+                        glena_idx = np.where(glena_O1regions == glacier_rgi_table.O1Region)[0][0]
+                        glen_a_multiplier = glena_df.loc[glena_idx,'glens_a_multiplier']
+                        fs = glena_df.loc[glena_idx,'fs']
+                    else:
+                        fs = pygem_prms.fs
+                        glen_a_multiplier = pygem_prms.glen_a_multiplier   
+                        print(fs,glen_a_multiplier)
+            except Exception as err:
+                print(err)
 
 
         # ----- CALIBRATION OPTIONS ------
@@ -1496,18 +1492,26 @@ def main(list_packed_vars):
                         # -------------------
                         # --- set up MCMC ---
                         # -------------------
+                        # mass balance observation and standard deviation
+                        obs = [(torch.tensor([mb_obs_mwea]),torch.tensor([mb_obs_mwea_err]))]
+
                         # if running full model (no emulator), several arguments are needed to evaluate the mass balance
-                        if pygem_prms.option_use_emulator:
-                            mbfxn = mbEmulator.eval         # declare which mass balance function is to be used
+                        if pygem_prms.opt_calib_binned_dh:
+                            mbfxn = get_binned_dh
+                            mbargs = (gdir, modelprms, glacier_rgi_table, fls, glen_a_multiplier, fs, pygem_inds, gdir.deltah['bin_edges'])
+                            # append deltah obs and undto list of obs
+                            obs.append((torch.tensor(gdir.deltah['dh']),torch.tensor([10])))
+                        elif pygem_prms.option_use_emulator:
+                            mbfxn = mbEmulator.eval
                             mbargs = None
                         else:
-                            mbfxn = mb_mwea_calc            # declare which mass balance function is to be used
+                            mbfxn = mb_mwea_calc
                             mbargs = (gdir, modelprms, glacier_rgi_table, fls)
 
                         # instantiate mbPosterior given priors, and observed values
                         # note, mbEmulator.eval expects the modelprms to be ordered like so: [tbias, kp, ddfsnow], so priors and initial guesses must also be ordered as such)
                         priors = {key: priors[key] for key in ['tbias','kp','ddfsnow'] if key in priors}
-                        mb = mcmc.mbPosterior(torch.tensor([mb_obs_mwea]), torch.tensor([mb_obs_mwea_err]), priors, mb_func=mbfxn, mb_args=mbargs, potential_fxns=[mb_max, must_melt])
+                        mb = mcmc.mbPosterior(obs, priors, mb_func=mbfxn, mb_args=mbargs, potential_fxns=[mb_max, must_melt])
 
                         # compile initial guesses and standardize by standard deviations
                         initial_guesses = torch.tensor([modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow']]).flatten()
