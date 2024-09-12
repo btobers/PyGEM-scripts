@@ -15,6 +15,7 @@ user_info = {'name':'Brandon Tober',
             'email':'btober@cmu.edu'}
 main_directory = os.getcwd()
 main_directory = '/trace/group/rounce/shared/Output/'      # file path hack if data is in different location from code
+# main_directory = '/Users/btober/Documents/pygem_data/Output/'      # file path hack if data is in different location from code
 # Output directory
 output_filepath = main_directory + '/../Output/'
 output_filepath = '/trace/group/rounce/btober/Output/'
@@ -147,10 +148,10 @@ elif option_calibration in ['MCMC']:
     tbias_stepsmall = 0.05
     option_areaconstant = True      # Option to keep area constant or evolve
     # Chain options
+    mcmc_step = 0.5                 # mcmc step size (in terms of standard deviation)
     n_chains = 1                    # number of chains (min 1, max 3)
     mcmc_sample_no = 20000          # number of steps (10000 was found to be sufficient in HMA)
     mcmc_burn_pct = 2               # percentage of steps to burn-in (0 records all steps in chain)
-    mcmc_step = 0.5                 # mcmc step size (in terms of standard deviation)
     thin_interval = 10              # thin interval if need to reduce file size (best to leave at 1 if space allows)
     # Degree-day factor of snow distribution options
     ddfsnow_disttype = 'truncnormal'# distribution type ('truncnormal', 'uniform')
@@ -398,6 +399,9 @@ if include_debris:
 else:
     debris_fp = None
 
+# OIB surface elevation time data
+opt_calib_binned_dh = False
+oib_fp = main_directory + '/../OIB/lidar_cop30_deltas/'
 
 #%% ===== MODEL TIME PERIOD DETAILS =====
 # Models require complete data for each year such that refreezing, scaling, etc. can be calculated

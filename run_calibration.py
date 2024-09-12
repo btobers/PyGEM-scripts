@@ -661,7 +661,7 @@ def main(list_packed_vars):
                     # double difference to remove the COP30 signal from the relative OIB surface elevation changes
                     dbldiffs = np.diff(bin_diffs,axis=1)
                     gdir.deltah = {
-                                    'timstamps': dates,
+                                    'timestamps': dates,
                                     'bin_edges':bin_edges,
                                     'bin_area':bin_area,
                                     'dh':dbldiffs,
@@ -1336,7 +1336,7 @@ def main(list_packed_vars):
 
                 # prepare export modelprms dictionary
                 modelprms_export = {}
-                for k in ['tbias','kp','ddfsnow','ddfice','mb_mwea','P']:
+                for k in ['tbias','kp','ddfsnow','ddfice','mb_mwea','ar']:
                     modelprms_export[k] = {}
 
                 # ===== RUNNING MCMC =====
@@ -1521,7 +1521,7 @@ def main(list_packed_vars):
                         sampler = mcmc.Metropolis(mb.means, mb.stds)
 
                         # draw samples
-                        P_chain, m_chain_z, mb_chain, m_primes_z, mb_primes, steps = sampler.sample(initial_guesses_z, 
+                        m_chain_z, pred_chain, m_primes_z, pred_primes, steps, ar = sampler.sample(initial_guesses_z, 
                                                                                                     mb.log_posterior, 
                                                                                                     h=pygem_prms.mcmc_step, 
                                                                                                     n_samples=pygem_prms.mcmc_sample_no, 
@@ -1534,8 +1534,8 @@ def main(list_packed_vars):
                         m_primes = mcmc.inverse_z_normalize(m_primes_z, mb.means, mb.stds)
 
                         # concatenate mass balance
-                        m_chain = torch.cat((m_chain, mb_chain.reshape(-1,1)), dim=1)
-                        m_primes = torch.cat((m_primes, mb_primes.reshape(-1,1)), dim=1)
+                        m_chain = torch.cat((m_chain, torch.tensor(pred_chain[0]).reshape(-1,1)), dim=1)
+                        m_primes = torch.cat((m_primes, torch.tensor(pred_primes[0]).reshape(-1,1)), dim=1)
 
                         if debug:
                             # print('\nacceptance ratio:', model.step_method_dict[next(iter(model.stochastics))][0].ratio)
@@ -1543,7 +1543,7 @@ def main(list_packed_vars):
                                   'mb_mwea_std:', np.round(torch.std(m_chain[:,-1]).item(),3),
                                   '\nmb_obs_mean:', np.round(mb_obs_mwea,3), 'mb_obs_std:', np.round(mb_obs_mwea_err,3))
                             # plot chain
-                            mcmc.plot_chain(m_primes, m_chain, P_chain, glacier_str)
+                            mcmc.plot_chain(m_primes, m_chain, ar, glacier_str)
 
                         # Store data from model to be exported
                         chain_str = 'chain_' + str(n_chain)
@@ -1553,7 +1553,7 @@ def main(list_packed_vars):
                         modelprms_export['ddfice'][chain_str] = (m_chain[:,2] /
                                                                   pygem_prms.ddfsnow_iceratio).tolist()
                         modelprms_export['mb_mwea'][chain_str] = m_chain[:,3].tolist()
-                        modelprms_export['P'][chain_str] = P_chain.tolist()
+                        modelprms_export['ar'][chain_str] = ar
 
                     # Export model parameters
                     modelprms_export['precgrad'] = [pygem_prms.precgrad]
