@@ -15,10 +15,10 @@ user_info = {'name':'Brandon Tober',
             'email':'btober@cmu.edu'}
 main_directory = os.getcwd()
 main_directory = '/trace/group/rounce/shared/Output/'      # file path hack if data is in different location from code
-# main_directory = '/Users/btober/Documents/pygem_data/Output/'      # file path hack if data is in different location from code
+main_directory = '/Users/btober/Documents/pygem_data/Output/'      # file path hack if data is in different location from code
 # Output directory
 output_filepath = main_directory + '/../Output/'
-output_filepath = '/trace/group/rounce/btober/Output/'
+# output_filepath = '/trace/group/rounce/btober/Output/'
 
 #%% ===== GLACIER SELECTION =====
 rgi_regionsO1 = [1]                 # 1st order region number (RGI V6.0)
@@ -150,7 +150,7 @@ elif option_calibration in ['MCMC']:
     # Chain options
     mcmc_step = 0.5                 # mcmc step size (in terms of standard deviation)
     n_chains = 1                    # number of chains (min 1, max 3)
-    mcmc_sample_no = 20000          # number of steps (10000 was found to be sufficient in HMA)
+    mcmc_sample_no = 100          # number of steps (10000 was found to be sufficient in HMA)
     mcmc_burn_pct = 2               # percentage of steps to burn-in (0 records all steps in chain)
     thin_interval = 10              # thin interval if need to reduce file size (best to leave at 1 if space allows)
     # Degree-day factor of snow distribution options
@@ -213,7 +213,7 @@ icethickness_cal_frac_byarea = 0.9  # Regional glacier area fraction that is use
 
 #%% ===== SIMULATION AND GLACIER DYNAMICS OPTIONS =====
 # Glacier dynamics scheme (options: 'OGGM', 'MassRedistributionCurves', None)
-option_dynamics = None
+option_dynamics = 'OGGM'
     
 # Bias adjustment option (options: 0, 1, 2, 3) 
 #  0: no adjustment
@@ -400,7 +400,7 @@ else:
     debris_fp = None
 
 # OIB surface elevation time data
-opt_calib_binned_dh = False
+opt_calib_binned_dh = True
 oib_fp = main_directory + '/../OIB/lidar_cop30_deltas/'
 
 #%% ===== MODEL TIME PERIOD DETAILS =====

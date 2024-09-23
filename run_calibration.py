@@ -647,27 +647,37 @@ def main(list_packed_vars):
 
         # oib deltah data
         if pygem_prms.opt_calib_binned_dh:
-            try:
+            # try:
+            for batman in [0]:
                 # get rgi7id to load oib data
                 rgi7id = surfelev.get_rgi7id(glacier_str, debug=debug)
                 if rgi7id:
-                    oib_dict = surfelev.load_oib(surfelev.get_rgi7id(glacier_str, debug=debug))
+                    oib_dict = surfelev.load_oib(rgi7id)
                     # get oib diffs
-                    bin_edges, bin_area, bin_diffs, dates = surfelev.get_oib_diffs(oib_dict=oib_dict, aggregate=100, debug=debug)
+                    bin_edges, bin_area, bin_diffs, bin_sigmas, dates = surfelev.get_oib_diffs(oib_dict=oib_dict, aggregate=100, debug=debug)
                     # only retain diffs for survey dates within model timespan
                     _, oib_inds, pygem_inds = np.intersect1d(dates.to_numpy(), gdir.dates_table.date.to_numpy(), return_indices=True)
                     bin_diffs = bin_diffs[:,oib_inds]
+                    bin_sigmas = bin_sigmas[:,oib_inds]
                     dates = dates[oib_inds]
+
+                    # must be at least two surveys
+                    if bin_diffs.shape[1] < 2:
+                        raise ValueError("Must be at least two individual OIB surveys to difference.")
+
                     # double difference to remove the COP30 signal from the relative OIB surface elevation changes
                     dbldiffs = np.diff(bin_diffs,axis=1)
+                    # take mean sigma_obs from each set of consecutive surveys
+                    sigmas = (bin_sigmas[:, :-1] + bin_sigmas[:, 1:]) / 2
                     gdir.deltah = {
                                     'timestamps': dates,
                                     'bin_edges':bin_edges,
                                     'bin_area':bin_area,
                                     'dh':dbldiffs,
+                                    'sigma':sigmas
                                 }
                     
-                    # get glen_a
+                    # get glen_a, as dynamics will need to be on to get thickness changes
                     if pygem_prms.use_reg_glena:
                         glena_df = pd.read_csv(pygem_prms.glena_reg_fullfn)                    
                         glena_O1regions = [int(x) for x in glena_df.O1Region.values]
@@ -679,8 +689,8 @@ def main(list_packed_vars):
                         fs = pygem_prms.fs
                         glen_a_multiplier = pygem_prms.glen_a_multiplier   
                         print(fs,glen_a_multiplier)
-            except Exception as err:
-                print(err)
+            # except Exception as err:
+            #     print(err)
 
 
         # ----- CALIBRATION OPTIONS ------
@@ -1500,7 +1510,7 @@ def main(list_packed_vars):
                             mbfxn = get_binned_dh
                             mbargs = (gdir, modelprms, glacier_rgi_table, fls, glen_a_multiplier, fs, pygem_inds, gdir.deltah['bin_edges'])
                             # append deltah obs and undto list of obs
-                            obs.append((torch.tensor(gdir.deltah['dh']),torch.tensor([10])))
+                            obs.append((torch.tensor(gdir.deltah['dh']),gdir.deltah['sigma']))
                         elif pygem_prms.option_use_emulator:
                             mbfxn = mbEmulator.eval
                             mbargs = None
