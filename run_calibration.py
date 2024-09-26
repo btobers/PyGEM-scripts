@@ -1348,10 +1348,12 @@ def main(list_packed_vars):
                 modelprms_export = {}
                 for k in ['tbias','kp','ddfsnow','ddfice','mb_mwea','ar']:
                     modelprms_export[k] = {}
+                if pygem_prms.opt_calib_binned_dh:
+                    modelprms_export['dh'] = {}
 
                 # ===== RUNNING MCMC =====
-                # try:
-                for batman in [0]:
+                try:
+                # for batman in [0]:
 
                     ### loop over chains, adjust initial guesses accordingly ###
                     for n_chain in range(0,pygem_prms.n_chains):
@@ -1510,7 +1512,8 @@ def main(list_packed_vars):
                             mbfxn = get_binned_dh
                             mbargs = (gdir, modelprms, glacier_rgi_table, fls, glen_a_multiplier, fs, pygem_inds, gdir.deltah['bin_edges'])
                             # append deltah obs and undto list of obs
-                            obs.append((torch.tensor(gdir.deltah['dh']),gdir.deltah['sigma']))
+                            obs.append((torch.tensor(gdir.deltah['dh']),torch.tensor(gdir.deltah['sigma'])))
+                            # obs.append((torch.tensor(gdir.deltah['dh']),torch.tensor([10])))
                         elif pygem_prms.option_use_emulator:
                             mbfxn = mbEmulator.eval
                             mbargs = None
@@ -1531,7 +1534,7 @@ def main(list_packed_vars):
                         sampler = mcmc.Metropolis(mb.means, mb.stds)
 
                         # draw samples
-                        m_chain_z, pred_chain, m_primes_z, pred_primes, steps, ar = sampler.sample(initial_guesses_z, 
+                        m_chain_z, pred_chain, m_primes_z, pred_primes, _, ar = sampler.sample(initial_guesses_z, 
                                                                                                     mb.log_posterior, 
                                                                                                     h=pygem_prms.mcmc_step, 
                                                                                                     n_samples=pygem_prms.mcmc_sample_no, 
@@ -1553,7 +1556,12 @@ def main(list_packed_vars):
                                   'mb_mwea_std:', np.round(torch.std(m_chain[:,-1]).item(),3),
                                   '\nmb_obs_mean:', np.round(mb_obs_mwea,3), 'mb_obs_std:', np.round(mb_obs_mwea_err,3))
                             # plot chain
-                            mcmc.plot_chain(m_primes, m_chain, ar, glacier_str)
+                            fp = (pygem_prms.output_filepath + f'calibration/' + glacier_str.split('.')[0].zfill(2) 
+                                    + '/fig/')
+                            os.makedirs(fp, exist_ok=True)
+                            mcmc.plot_chain(m_primes, m_chain, ar, glacier_str, fpath=f'{fp}/{glacier_str}-chain{n_chain}.png')
+                            for i in pred_chain.keys():
+                                mcmc.plot_1t1(obs[i], pred_chain[i], glacier_str, fpath=f'{fp}/{glacier_str}-chain{n_chain}-1t1-{i}.png')
 
                         # Store data from model to be exported
                         chain_str = 'chain_' + str(n_chain)
@@ -1564,6 +1572,9 @@ def main(list_packed_vars):
                                                                   pygem_prms.ddfsnow_iceratio).tolist()
                         modelprms_export['mb_mwea'][chain_str] = m_chain[:,3].tolist()
                         modelprms_export['ar'][chain_str] = ar
+                        if pygem_prms.opt_calib_binned_dh:
+                            dh_preds = [preds.flatten().tolist() for preds in pred_chain[1]]
+                            modelprms_export['dh'][chain_str] = dh_preds
 
                     # Export model parameters
                     modelprms_export['precgrad'] = [pygem_prms.precgrad]
@@ -1571,12 +1582,15 @@ def main(list_packed_vars):
                     modelprms_export['mb_obs_mwea'] = [float(mb_obs_mwea)]
                     modelprms_export['mb_obs_mwea_err'] = [float(mb_obs_mwea_err)]
                     modelprms_export['priors'] = priors
+                    if pygem_prms.opt_calib_binned_dh:
+                        modelprms_export['dh']['x'] = ((gdir.deltah['bin_edges'][:-1] + gdir.deltah['bin_edges'][1:]) / 2).tolist()
+                        modelprms_export['dh']['obs'] = [ob.flatten().tolist() for ob in obs[1]]
 
                     modelprms_fn = glacier_str + '-modelprms_dict.pkl'
                     modelprms_fp = [(pygem_prms.output_filepath + f'calibration/' + glacier_str.split('.')[0].zfill(2) 
                                     + '/')]
                     # if not using emulator (running full model), save output in ./calibration/ and ./calibration-fullsim/
-                    if pygem_prms.option_use_emulator:
+                    if not pygem_prms.option_use_emulator:
                         modelprms_fp.append(pygem_prms.output_filepath + f'calibration{outpath_sfix}/' + glacier_str.split('.')[0].zfill(2) 
                                         + '/')
                     for fp in modelprms_fp:
@@ -1600,15 +1614,15 @@ def main(list_packed_vars):
                     with open(mcmc_good_fp + txt_fn_good, "w") as text_file:
                         text_file.write(glacier_str + ' successfully exported mcmc results')
                 
-                # except:
-                #     # MCMC LOG FAILURE
-                #     mcmc_fail_fp = pygem_prms.output_filepath + f'mcmc_fail{outpath_sfix}/' + glacier_str.split('.')[0].zfill(2) + '/'
-                #     if not os.path.exists(mcmc_fail_fp):
-                #         os.makedirs(mcmc_fail_fp, exist_ok=True)
-                #     print(mcmc_fail_fp)
-                #     txt_fn_fail = glacier_str + "-mcmc_fail.txt"
-                #     with open(mcmc_fail_fp + txt_fn_fail, "w") as text_file:
-                #         text_file.write(glacier_str + ' failed to complete MCMC')
+                except:
+                    # MCMC LOG FAILURE
+                    mcmc_fail_fp = pygem_prms.output_filepath + f'mcmc_fail{outpath_sfix}/' + glacier_str.split('.')[0].zfill(2) + '/'
+                    if not os.path.exists(mcmc_fail_fp):
+                        os.makedirs(mcmc_fail_fp, exist_ok=True)
+                    print(mcmc_fail_fp)
+                    txt_fn_fail = glacier_str + "-mcmc_fail.txt"
+                    with open(mcmc_fail_fp + txt_fn_fail, "w") as text_file:
+                        text_file.write(glacier_str + ' failed to complete MCMC')
 
 
             #%% ===== HUSS AND HOCK (2015) CALIBRATION =====
