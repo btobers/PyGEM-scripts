@@ -647,20 +647,20 @@ def main(list_packed_vars):
 
         # oib deltah data
         if pygem_prms.opt_calib_binned_dh:
-            # try:
-            for batman in [0]:
+            try:
                 # get rgi7id to load oib data
                 rgi7id = surfelev.get_rgi7id(glacier_str, debug=debug)
                 if rgi7id:
                     oib_dict = surfelev.load_oib(rgi7id)
                     # get oib diffs
-                    bin_edges, bin_area, bin_diffs, bin_sigmas, dates = surfelev.get_oib_diffs(oib_dict=oib_dict, aggregate=100, debug=debug)
+                    bin_edges, bin_area, bin_diffs, bin_sigmas, dates = surfelev.get_oib_diffs(oib_dict=oib_dict, aggregate=100)
                     # only retain diffs for survey dates within model timespan
                     _, oib_inds, pygem_inds = np.intersect1d(dates.to_numpy(), gdir.dates_table.date.to_numpy(), return_indices=True)
                     bin_diffs = bin_diffs[:,oib_inds]
                     bin_sigmas = bin_sigmas[:,oib_inds]
                     dates = dates[oib_inds]
-
+                    if debug:
+                        print(f'OIB survey dates:\n{", ".join([str(dt.year)+"-"+str(dt.month)+"-"+str(dt.day) for dt in dates])}')
                     # must be at least two surveys
                     if bin_diffs.shape[1] < 2:
                         raise ValueError("Must be at least two individual OIB surveys to difference.")
@@ -687,11 +687,10 @@ def main(list_packed_vars):
                         fs = glena_df.loc[glena_idx,'fs']
                     else:
                         fs = pygem_prms.fs
-                        glen_a_multiplier = pygem_prms.glen_a_multiplier   
-                        print(fs,glen_a_multiplier)
-            # except Exception as err:
-            #     print(err)
+                        glen_a_multiplier = pygem_prms.glen_a_multiplier
 
+            except Exception as err:
+                fls = None
 
         # ----- CALIBRATION OPTIONS ------
         if (fls is not None) and (gdir.mbdata is not None) and (glacier_area.sum() > 0):
@@ -1512,8 +1511,8 @@ def main(list_packed_vars):
                             mbfxn = get_binned_dh
                             mbargs = (gdir, modelprms, glacier_rgi_table, fls, glen_a_multiplier, fs, pygem_inds, gdir.deltah['bin_edges'])
                             # append deltah obs and undto list of obs
-                            obs.append((torch.tensor(gdir.deltah['dh']),torch.tensor(gdir.deltah['sigma'])))
-                            # obs.append((torch.tensor(gdir.deltah['dh']),torch.tensor([10])))
+                            # obs.append((torch.tensor(gdir.deltah['dh']),torch.tensor(gdir.deltah['sigma'])))
+                            obs.append((torch.tensor(gdir.deltah['dh']),torch.tensor([10])))
                         elif pygem_prms.option_use_emulator:
                             mbfxn = mbEmulator.eval
                             mbargs = None
@@ -1619,7 +1618,6 @@ def main(list_packed_vars):
                     mcmc_fail_fp = pygem_prms.output_filepath + f'mcmc_fail{outpath_sfix}/' + glacier_str.split('.')[0].zfill(2) + '/'
                     if not os.path.exists(mcmc_fail_fp):
                         os.makedirs(mcmc_fail_fp, exist_ok=True)
-                    print(mcmc_fail_fp)
                     txt_fn_fail = glacier_str + "-mcmc_fail.txt"
                     with open(mcmc_fail_fp + txt_fn_fail, "w") as text_file:
                         text_file.write(glacier_str + ' failed to complete MCMC')
@@ -2102,7 +2100,10 @@ def main(list_packed_vars):
                 os.makedirs(fail_fp, exist_ok=True)
             txt_fn_fail = glacier_str + "-cal_fail.txt"
             with open(fail_fp + txt_fn_fail, "w") as text_file:
-                text_file.write(glacier_str + ' had no flowlines or mb_data.')
+                if not pygem_prms.opt_calib_binned_dh:
+                    text_file.write(glacier_str + ' had no flowlines or mb_data.')
+                else:
+                    text_file.write(glacier_str + ' had no compatible OIB surface elevation data.')
 
     # Global variables for Spyder development
     if args.num_simultaneous_processes == 1:
