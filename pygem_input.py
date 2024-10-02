@@ -14,12 +14,14 @@ user_info = {'name':'Brandon Tober',
             'institution':'Carnegie Mellon University, Pittsburgh PA',
             'email':'btober@cmu.edu'}
 main_directory = os.getcwd()
-# main_directory = '/trace/group/rounce/shared/Output/'      # file path hack if data is in different location from code
+main_directory = '/trace/group/rounce/shared/Output/'      # file path hack if data is in different location from code
+# main_directory = '/Users/btober/Documents/pygem_data/Output/'      # file path hack if data is in different location from code
 # Output directory
 output_filepath = main_directory + '/../Output/'
+output_filepath = '/trace/group/rounce/btober/Output/'
 
 #%% ===== GLACIER SELECTION =====
-rgi_regionsO1 = [13]                 # 1st order region number (RGI V6.0)
+rgi_regionsO1 = [1]                 # 1st order region number (RGI V6.0)
 rgi_regionsO2 = 'all'               # 2nd order region number (RGI V6.0)
 # RGI glacier number (RGI V6.0)
 #  Three options: (1) use glacier numbers for a given region (or 'all'), must have glac_no set to None
@@ -30,10 +32,10 @@ rgi_glac_number = 'all'
 
 glac_no_skip = None
 glac_no = None 
-glac_no = ['15.03733'] # Khumbu Glacier
+# glac_no = ['15.03733'] # Khumbu Glacier
 # glac_no = ['1.10689'] # Columbia Glacier
 # glac_no = ['1.03622'] # LeConte Glacier
-
+# glac_no = ['1.15648'] # kennicott
 
 if glac_no is not None:
     rgi_regionsO1 = sorted(list(set([int(x.split('.')[0]) for x in glac_no])))
@@ -47,7 +49,7 @@ include_tidewater = True               # Switch to include marine-terminating gl
 include_calving = True                 # Switch to ignore calving and treat tidewater glaciers as land-terminating
 
 oggm_base_url = 'https://cluster.klima.uni-bremen.de/~oggm/gdirs/oggm_v1.6/L1-L2_files/elev_bands/'
-logging_level = 'WORKFLOW'             # DEBUG, INFO, WARNING, ERROR, WORKFLOW, CRITICAL (recommended WORKFLOW)
+logging_level = 'ERROR'             # DEBUG, INFO, WARNING, ERROR, WORKFLOW, CRITICAL (recommended WORKFLOW)
 oggm_border = 240                      # 10, 80, 160, 240 (recommend 240 if expecting glaciers for long runs where glaciers may grow)
 
 #%% ===== CLIMATE DATA AND TIME PERIODS ===== 
@@ -79,8 +81,8 @@ if hindcast:
 
 
 #%% ===== CALIBRATION OPTIONS =====
-# Calibration option ('emulator', 'MCMC', 'MCMC_fullsim' 'HH2015', 'HH2015mod', None)
-option_calibration = 'HH2015'
+# Calibration option ('emulator', 'MCMC' 'HH2015', 'HH2015mod', None)
+option_calibration = 'MCMC'
 
 # Prior distribution (specify filename or set equal to None)
 priors_reg_fullfn = main_directory + '/../Output/calibration/priors_region.csv'
@@ -112,7 +114,7 @@ elif option_calibration == 'HH2015mod':
     
 elif option_calibration == 'emulator':
     emulator_sims = 100             # Number of simulations to develop the emulator
-    overwrite_em_sims = False       # Overwrite emulator simulations
+    overwrite_em_sims = True       # Overwrite emulator simulations
     opt_hh2015_mod = True           # Option to also perform the HH2015_mod calibration using the emulator
     emulator_fp = output_filepath + 'emulator/'
     tbias_step = 0.5                # tbias step size
@@ -138,19 +140,19 @@ elif option_calibration == 'emulator':
     ftol_opt = 1e-6                 # tolerance for SciPy optimization scheme
     eps_opt = 0.01                  # epsilon (adjust variables for jacobian) for SciPy optimization scheme
     
-elif option_calibration in ['MCMC', 'MCMC_fullsim']:
+elif option_calibration in ['MCMC']:
+    option_use_emulator = True      # use emulator or full model (if true, calibration must have first been run with option_calibretion=='emulator')
+    option_calib_binned_dh = True   # calibrate against binned \delta h observations along with geodetic mass balance
     emulator_fp = output_filepath + 'emulator/'
     emulator_sims = 100
-    tbias_step = 1
-    tbias_stepsmall = 0.1
+    tbias_step = 0.1
+    tbias_stepsmall = 0.05
     option_areaconstant = True      # Option to keep area constant or evolve
     # Chain options
+    mcmc_step = 0.5                 # mcmc step size (in terms of standard deviation)
     n_chains = 1                    # number of chains (min 1, max 3)
-    mcmc_sample_no = 10000         # number of steps (10000 was found to be sufficient in HMA)
-    mcmc_burn_no = 200              # number of steps to burn-in (0 records all steps in chain)
-#    mcmc_sample_no = 100          # number of steps (10000 was found to be sufficient in HMA)
-#    mcmc_burn_no = 0              # number of steps to burn-in (0 records all steps in chain)
-    mcmc_step = None                # step option (None or 'am')
+    mcmc_sample_no = 20000          # number of steps (10000 was found to be sufficient in HMA)
+    mcmc_burn_pct = 2               # percentage of steps to burn-in (0 records all steps in chain)
     thin_interval = 10              # thin interval if need to reduce file size (best to leave at 1 if space allows)
     # Degree-day factor of snow distribution options
     ddfsnow_disttype = 'truncnormal'# distribution type ('truncnormal', 'uniform')
@@ -186,6 +188,7 @@ elif option_calibration in ['MCMC', 'MCMC_fullsim']:
 hugonnet_fp = main_directory + '/../DEMs/Hugonnet2020/'
 #hugonnet_fn = 'df_pergla_global_20yr-filled.csv'
 hugonnet_fn = 'df_pergla_global_20yr-filled-FAcorrected.csv'
+assert os.path.exists(hugonnet_fp + hugonnet_fn), f'mb dataset not found : {hugonnet_fp + hugonnet_fn}'
 if '-filled' in hugonnet_fn:
     hugonnet_mb_cn = 'mb_mwea'
     hugonnet_mb_err_cn = 'mb_mwea_err'
@@ -199,6 +202,9 @@ else:
 hugonnet_time1_cn = 't1'
 hugonnet_time2_cn = 't2'
 hugonnet_area_cn = 'area_km2'
+
+# OIB surface elevation time data
+oib_fp = main_directory + '/../OIB/lidar_cop30_deltas/'
 
 # ----- Frontal Ablation Dataset -----
 calving_fp = main_directory + '/../calving_data/analysis/'
@@ -396,7 +402,6 @@ if include_debris:
     assert os.path.exists(debris_fp), 'Debris filepath does not exist. Turn off include_debris or add filepath.'
 else:
     debris_fp = None
-
 
 #%% ===== MODEL TIME PERIOD DETAILS =====
 # Models require complete data for each year such that refreezing, scaling, etc. can be calculated
