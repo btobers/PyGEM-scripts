@@ -141,7 +141,8 @@ elif option_calibration == 'emulator':
     eps_opt = 0.01                  # epsilon (adjust variables for jacobian) for SciPy optimization scheme
     
 elif option_calibration in ['MCMC']:
-    option_use_emulator = True      # use emulator or full model
+    option_use_emulator = True      # use emulator or full model (if true, calibration must have first been run with option_calibretion=='emulator')
+    option_calib_binned_dh = True   # calibrate against binned \delta h observations along with geodetic mass balance
     emulator_fp = output_filepath + 'emulator/'
     emulator_sims = 100
     tbias_step = 0.1
@@ -201,6 +202,9 @@ else:
 hugonnet_time1_cn = 't1'
 hugonnet_time2_cn = 't2'
 hugonnet_area_cn = 'area_km2'
+
+# OIB surface elevation time data
+oib_fp = main_directory + '/../OIB/lidar_cop30_deltas/'
 
 # ----- Frontal Ablation Dataset -----
 calving_fp = main_directory + '/../calving_data/analysis/'
@@ -398,10 +402,6 @@ if include_debris:
     assert os.path.exists(debris_fp), 'Debris filepath does not exist. Turn off include_debris or add filepath.'
 else:
     debris_fp = None
-
-# OIB surface elevation time data
-opt_calib_binned_dh = True
-oib_fp = main_directory + '/../OIB/lidar_cop30_deltas/'
 
 #%% ===== MODEL TIME PERIOD DETAILS =====
 # Models require complete data for each year such that refreezing, scaling, etc. can be calculated

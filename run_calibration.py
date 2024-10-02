@@ -646,7 +646,7 @@ def main(list_packed_vars):
 
 
         # oib deltah data
-        if pygem_prms.opt_calib_binned_dh:
+        if pygem_prms.option_calib_binned_dh:
             try:
                 # get rgi7id to load oib data
                 rgi7id = surfelev.get_rgi7id(glacier_str, debug=debug)
@@ -1347,8 +1347,6 @@ def main(list_packed_vars):
                 modelprms_export = {}
                 for k in ['tbias','kp','ddfsnow','ddfice','mb_mwea','ar']:
                     modelprms_export[k] = {}
-                if pygem_prms.opt_calib_binned_dh:
-                    modelprms_export['dh'] = {}
 
                 # ===== RUNNING MCMC =====
                 try:
@@ -1506,19 +1504,26 @@ def main(list_packed_vars):
                         # mass balance observation and standard deviation
                         obs = [(torch.tensor([mb_obs_mwea]),torch.tensor([mb_obs_mwea_err]))]
 
-                        # if running full model (no emulator), several arguments are needed to evaluate the mass balance
-                        if pygem_prms.opt_calib_binned_dh:
-                            mbfxn = get_binned_dh
-                            mbargs = (gdir, modelprms, glacier_rgi_table, fls, glen_a_multiplier, fs, pygem_inds, gdir.deltah['bin_edges'])
-                            # append deltah obs and undto list of obs
+                        # if running full model (no emulator), or calibrating against binned \delta h, several arguments are needed
+                        if pygem_prms.option_calib_binned_dh:
+                            mbfxn = get_binned_dh                                   # returns (mb_mwea, binned_dh)
+                            mbargs = (gdir,                                         # arguments for get_binned_dh()
+                                      modelprms, 
+                                      glacier_rgi_table, 
+                                      fls, 
+                                      glen_a_multiplier, 
+                                      fs, 
+                                      pygem_inds, 
+                                      gdir.deltah['bin_edges'])
+                            # append deltah obs and undto obs list
                             # obs.append((torch.tensor(gdir.deltah['dh']),torch.tensor(gdir.deltah['sigma'])))
                             obs.append((torch.tensor(gdir.deltah['dh']),torch.tensor([10])))
                         elif pygem_prms.option_use_emulator:
-                            mbfxn = mbEmulator.eval
-                            mbargs = None
+                            mbfxn = mbEmulator.eval                                 # returns (mb_mwea)
+                            mbargs = None                                           # no additional arguments for mbEmulator.eval()
                         else:
-                            mbfxn = mb_mwea_calc
-                            mbargs = (gdir, modelprms, glacier_rgi_table, fls)
+                            mbfxn = mb_mwea_calc                                    # returns (mb_mwea)
+                            mbargs = (gdir, modelprms, glacier_rgi_table, fls)      # arguments for mb_mwea_calc()
 
                         # instantiate mbPosterior given priors, and observed values
                         # note, mbEmulator.eval expects the modelprms to be ordered like so: [tbias, kp, ddfsnow], so priors and initial guesses must also be ordered as such)
@@ -1571,7 +1576,9 @@ def main(list_packed_vars):
                                                                   pygem_prms.ddfsnow_iceratio).tolist()
                         modelprms_export['mb_mwea'][chain_str] = m_chain[:,3].tolist()
                         modelprms_export['ar'][chain_str] = ar
-                        if pygem_prms.opt_calib_binned_dh:
+                        if pygem_prms.option_calib_binned_dh:
+                            if 'dh' not in modelprms_export.keys():
+                                modelprms_export['dh'] = {} # add key to export \delta h predictions
                             dh_preds = [preds.flatten().tolist() for preds in pred_chain[1]]
                             modelprms_export['dh'][chain_str] = dh_preds
 
@@ -1581,9 +1588,10 @@ def main(list_packed_vars):
                     modelprms_export['mb_obs_mwea'] = [float(mb_obs_mwea)]
                     modelprms_export['mb_obs_mwea_err'] = [float(mb_obs_mwea_err)]
                     modelprms_export['priors'] = priors
-                    if pygem_prms.opt_calib_binned_dh:
+                    if pygem_prms.option_calib_binned_dh:
                         modelprms_export['dh']['x'] = ((gdir.deltah['bin_edges'][:-1] + gdir.deltah['bin_edges'][1:]) / 2).tolist()
                         modelprms_export['dh']['obs'] = [ob.flatten().tolist() for ob in obs[1]]
+                        modelprms_export['dh']['date'] = gdir.deltah['timestamps']
 
                     modelprms_fn = glacier_str + '-modelprms_dict.pkl'
                     modelprms_fp = [(pygem_prms.output_filepath + f'calibration/' + glacier_str.split('.')[0].zfill(2) 
@@ -2100,10 +2108,10 @@ def main(list_packed_vars):
                 os.makedirs(fail_fp, exist_ok=True)
             txt_fn_fail = glacier_str + "-cal_fail.txt"
             with open(fail_fp + txt_fn_fail, "w") as text_file:
-                if not pygem_prms.opt_calib_binned_dh:
+                if not pygem_prms.option_calib_binned_dh:
                     text_file.write(glacier_str + ' had no flowlines or mb_data.')
                 else:
-                    text_file.write(glacier_str + ' had no compatible OIB surface elevation data.')
+                    text_file.write(glacier_str + ' had no compatible surface elevation data.')
 
     # Global variables for Spyder development
     if args.num_simultaneous_processes == 1:
