@@ -140,9 +140,9 @@ elif option_calibration == 'emulator':
     ftol_opt = 1e-6                 # tolerance for SciPy optimization scheme
     eps_opt = 0.01                  # epsilon (adjust variables for jacobian) for SciPy optimization scheme
     
-elif option_calibration in ['MCMC']:
+elif option_calibration == 'MCMC':
     option_use_emulator = True      # use emulator or full model (if true, calibration must have first been run with option_calibretion=='emulator')
-    option_calib_binned_dh = True   # calibrate against binned \delta h observations along with geodetic mass balance
+    option_calib_binned_dh = False  # calibrate against binned \delta h observations along with geodetic mass balance
     emulator_fp = output_filepath + 'emulator/'
     emulator_sims = 100
     tbias_step = 0.1

@@ -646,7 +646,7 @@ def main(list_packed_vars):
 
 
         # oib deltah data
-        if pygem_prms.option_calib_binned_dh:
+        if pygem_prms.option_calibration == 'MCMC' and pygem_prms.option_calib_binned_dh:
             try:
                 # get rgi7id to load oib data
                 rgi7id = surfelev.get_rgi7id(glacier_str, debug=debug)
@@ -1349,8 +1349,8 @@ def main(list_packed_vars):
                     modelprms_export[k] = {}
 
                 # ===== RUNNING MCMC =====
-                try:
-                # for batman in [0]:
+                # try:
+                for batman in [0]:
 
                     ### loop over chains, adjust initial guesses accordingly ###
                     for n_chain in range(0,pygem_prms.n_chains):
@@ -1392,7 +1392,7 @@ def main(list_packed_vars):
                             modelprms['ddfice'] = modelprms['ddfsnow'] / pygem_prms.ddfsnow_iceratio
                             # Tbias lower bound based on some bins having negative climatic mass balance
                             modelprms['tbias'] = (-1 * (gdir.historical_climate['temp'] + gdir.historical_climate['lr'] *
-                                            (fls[0].surface_h.min() - gdir.historical_climate['elev'])).max())
+                                            (fls[0].surface_h.min() - gdir.historical_climate['elev'])).max()).item()
                             nbinyears_negmbclim, mb_mwea = mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=fls,
                                                                         return_tbias_mustmelt_wmb=True)
                             while nbinyears_negmbclim < 10 or mb_mwea > mb_obs_mwea:
@@ -1472,11 +1472,13 @@ def main(list_packed_vars):
                         # --------------------------------------------------------------
                         # ----- CHECK STARTING CONDITIONS (adjust tbias as needed) -----
                         # --------------------------------------------------------------
-                        # check starting mass balance is not less than the maximum mass loss
+                        # get starting mass
                         if pygem_prms.option_use_emulator:
                             mb_mwea_start = mbEmulator.eval([modelprms['tbias'], modelprms['kp'], modelprms['ddfsnow']])
                         else:
                             mb_mwea_start = mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=fls)
+
+                        # check that starting mass balance does not result in entire glacier melting over calibration period
                         while mb_mwea_start < mb_max_loss:
                             modelprms['tbias'] = modelprms['tbias'] - pygem_prms.tbias_step
                             if pygem_prms.option_use_emulator:
@@ -1484,7 +1486,7 @@ def main(list_packed_vars):
                             else:
                                 mb_mwea_start = mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=fls)
 
-                        # check melting occurs for starting conditions
+                        # check that melting occurs at the lowest elevation bin
                         mb_total_minelev_start = calc_mb_total_minelev(modelprms)
                         while mb_total_minelev_start > 0 and mb_mwea_start > mb_max_loss:
                             modelprms['tbias'] = modelprms['tbias'] + pygem_prms.tbias_stepsmall
@@ -1540,8 +1542,8 @@ def main(list_packed_vars):
                         # draw samples
                         m_chain_z, pred_chain, m_primes_z, pred_primes, _, ar = sampler.sample(initial_guesses_z, 
                                                                                                     mb.log_posterior, 
-                                                                                                    h=pygem_prms.mcmc_step, 
                                                                                                     n_samples=pygem_prms.mcmc_sample_no, 
+                                                                                                    h=pygem_prms.mcmc_step, 
                                                                                                     burnin=int(pygem_prms.mcmc_burn_pct/100*pygem_prms.mcmc_sample_no), 
                                                                                                     thin_factor=pygem_prms.thin_interval, 
                                                                                                     progress_bar=args.progress_bar)
@@ -1563,7 +1565,7 @@ def main(list_packed_vars):
                             fp = (pygem_prms.output_filepath + f'calibration/' + glacier_str.split('.')[0].zfill(2) 
                                     + '/fig/')
                             os.makedirs(fp, exist_ok=True)
-                            mcmc.plot_chain(m_primes, m_chain, ar, glacier_str, fpath=f'{fp}/{glacier_str}-chain{n_chain}.png')
+                            mcmc.plot_chain(m_primes, m_chain, obs[0], ar, glacier_str, fpath=f'{fp}/{glacier_str}-chain{n_chain}.png')
                             for i in pred_chain.keys():
                                 mcmc.plot_1t1(obs[i], pred_chain[i], glacier_str, fpath=f'{fp}/{glacier_str}-chain{n_chain}-1t1-{i}.png')
 
@@ -1621,14 +1623,14 @@ def main(list_packed_vars):
                     with open(mcmc_good_fp + txt_fn_good, "w") as text_file:
                         text_file.write(glacier_str + ' successfully exported mcmc results')
                 
-                except:
-                    # MCMC LOG FAILURE
-                    mcmc_fail_fp = pygem_prms.output_filepath + f'mcmc_fail{outpath_sfix}/' + glacier_str.split('.')[0].zfill(2) + '/'
-                    if not os.path.exists(mcmc_fail_fp):
-                        os.makedirs(mcmc_fail_fp, exist_ok=True)
-                    txt_fn_fail = glacier_str + "-mcmc_fail.txt"
-                    with open(mcmc_fail_fp + txt_fn_fail, "w") as text_file:
-                        text_file.write(glacier_str + ' failed to complete MCMC')
+                # except:
+                #     # MCMC LOG FAILURE
+                #     mcmc_fail_fp = pygem_prms.output_filepath + f'mcmc_fail{outpath_sfix}/' + glacier_str.split('.')[0].zfill(2) + '/'
+                #     if not os.path.exists(mcmc_fail_fp):
+                #         os.makedirs(mcmc_fail_fp, exist_ok=True)
+                #     txt_fn_fail = glacier_str + "-mcmc_fail.txt"
+                #     with open(mcmc_fail_fp + txt_fn_fail, "w") as text_file:
+                #         text_file.write(glacier_str + ' failed to complete MCMC')
 
 
             #%% ===== HUSS AND HOCK (2015) CALIBRATION =====
