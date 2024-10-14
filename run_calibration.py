@@ -1349,8 +1349,8 @@ def main(list_packed_vars):
                     modelprms_export[k] = {}
 
                 # ===== RUNNING MCMC =====
-                # try:
-                for batman in [0]:
+                try:
+                # for batman in [0]:
 
                     ### loop over chains, adjust initial guesses accordingly ###
                     for n_chain in range(0,pygem_prms.n_chains):
@@ -1565,9 +1565,13 @@ def main(list_packed_vars):
                             fp = (pygem_prms.output_filepath + f'calibration/' + glacier_str.split('.')[0].zfill(2) 
                                     + '/fig/')
                             os.makedirs(fp, exist_ok=True)
-                            mcmc.plot_chain(m_primes, m_chain, obs[0], ar, glacier_str, fpath=f'{fp}/{glacier_str}-chain{n_chain}.png')
+                            if args.num_simultaneous_processes > 1:
+                                show=False
+                            else:
+                                show=True
+                            mcmc.plot_chain(m_primes, m_chain, obs[0], ar, glacier_str, show=show, fpath=f'{fp}/{glacier_str}-chain{n_chain}.png')
                             for i in pred_chain.keys():
-                                mcmc.plot_1t1(obs[i], pred_chain[i], glacier_str, fpath=f'{fp}/{glacier_str}-chain{n_chain}-1t1-{i}.png')
+                                mcmc.plot_1t1(obs[i], pred_chain[i], glacier_str, show=show, fpath=f'{fp}/{glacier_str}-chain{n_chain}-1to1-{i}.png')
 
                         # Store data from model to be exported
                         chain_str = 'chain_' + str(n_chain)
@@ -1623,14 +1627,14 @@ def main(list_packed_vars):
                     with open(mcmc_good_fp + txt_fn_good, "w") as text_file:
                         text_file.write(glacier_str + ' successfully exported mcmc results')
                 
-                # except:
-                #     # MCMC LOG FAILURE
-                #     mcmc_fail_fp = pygem_prms.output_filepath + f'mcmc_fail{outpath_sfix}/' + glacier_str.split('.')[0].zfill(2) + '/'
-                #     if not os.path.exists(mcmc_fail_fp):
-                #         os.makedirs(mcmc_fail_fp, exist_ok=True)
-                #     txt_fn_fail = glacier_str + "-mcmc_fail.txt"
-                #     with open(mcmc_fail_fp + txt_fn_fail, "w") as text_file:
-                #         text_file.write(glacier_str + ' failed to complete MCMC')
+                except Exception as err:
+                    # MCMC LOG FAILURE
+                    mcmc_fail_fp = pygem_prms.output_filepath + f'mcmc_fail{outpath_sfix}/' + glacier_str.split('.')[0].zfill(2) + '/'
+                    if not os.path.exists(mcmc_fail_fp):
+                        os.makedirs(mcmc_fail_fp, exist_ok=True)
+                    txt_fn_fail = glacier_str + "-mcmc_fail.txt"
+                    with open(mcmc_fail_fp + txt_fn_fail, "w") as text_file:
+                        text_file.write(glacier_str + f' failed to complete MCMC: {err}')
 
 
             #%% ===== HUSS AND HOCK (2015) CALIBRATION =====
@@ -2110,10 +2114,10 @@ def main(list_packed_vars):
                 os.makedirs(fail_fp, exist_ok=True)
             txt_fn_fail = glacier_str + "-cal_fail.txt"
             with open(fail_fp + txt_fn_fail, "w") as text_file:
-                if not pygem_prms.option_calib_binned_dh:
-                    text_file.write(glacier_str + ' had no flowlines or mb_data.')
-                else:
+                if pygem_prms.option_calibration=='MCMC' and pygem_prms.option_calib_binned_dh:
                     text_file.write(glacier_str + ' had no compatible surface elevation data.')
+                else:
+                    text_file.write(glacier_str + ' had no flowlines or mb_data.')                    
 
     # Global variables for Spyder development
     if args.num_simultaneous_processes == 1:

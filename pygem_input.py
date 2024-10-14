@@ -40,7 +40,7 @@ glac_no = None
 if glac_no is not None:
     rgi_regionsO1 = sorted(list(set([int(x.split('.')[0]) for x in glac_no])))
 
-min_glac_area_km2 = 0                 # Filter for size of glaciers to include (km2). Set to 0 to include all.
+min_glac_area_km2 = 1                 # Filter for size of glaciers to include (km2). Set to 0 to include all.
 
 # Types of glaciers to include (True) or exclude (False)
 include_landterm = True                # Switch to include land-terminating glaciers
@@ -50,7 +50,7 @@ include_calving = True                 # Switch to ignore calving and treat tide
 
 oggm_base_url = 'https://cluster.klima.uni-bremen.de/~oggm/gdirs/oggm_v1.6/L1-L2_files/elev_bands/'
 logging_level = 'ERROR'             # DEBUG, INFO, WARNING, ERROR, WORKFLOW, CRITICAL (recommended WORKFLOW)
-oggm_border = 240                      # 10, 80, 160, 240 (recommend 240 if expecting glaciers for long runs where glaciers may grow)
+oggm_border = 80                      # 10, 80, 160, 240 (recommend 240 if expecting glaciers for long runs where glaciers may grow)
 
 #%% ===== CLIMATE DATA AND TIME PERIODS ===== 
 # Reference period runs (reference period refers to the calibration period)
@@ -114,7 +114,7 @@ elif option_calibration == 'HH2015mod':
     
 elif option_calibration == 'emulator':
     emulator_sims = 100             # Number of simulations to develop the emulator
-    overwrite_em_sims = True       # Overwrite emulator simulations
+    overwrite_em_sims = False       # Overwrite emulator simulations
     opt_hh2015_mod = True           # Option to also perform the HH2015_mod calibration using the emulator
     emulator_fp = output_filepath + 'emulator/'
     tbias_step = 0.5                # tbias step size
@@ -217,7 +217,7 @@ icethickness_cal_frac_byarea = 0.9  # Regional glacier area fraction that is use
 
 #%% ===== SIMULATION AND GLACIER DYNAMICS OPTIONS =====
 # Glacier dynamics scheme (options: 'OGGM', 'MassRedistributionCurves', None)
-option_dynamics = 'OGGM'
+option_dynamics = None
     
 # Bias adjustment option (options: 0, 1, 2, 3) 
 #  0: no adjustment
