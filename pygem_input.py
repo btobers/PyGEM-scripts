@@ -142,7 +142,7 @@ elif option_calibration == 'emulator':
     
 elif option_calibration == 'MCMC':
     option_use_emulator = True      # use emulator or full model (if true, calibration must have first been run with option_calibretion=='emulator')
-    option_calib_binned_dh = False  # calibrate against binned \delta h observations along with geodetic mass balance
+    option_calib_binned_dh = True  # calibrate against binned \delta h observations along with geodetic mass balance
     emulator_fp = output_filepath + 'emulator/'
     emulator_sims = 100
     tbias_step = 0.1
@@ -217,7 +217,7 @@ icethickness_cal_frac_byarea = 0.9  # Regional glacier area fraction that is use
 
 #%% ===== SIMULATION AND GLACIER DYNAMICS OPTIONS =====
 # Glacier dynamics scheme (options: 'OGGM', 'MassRedistributionCurves', None)
-option_dynamics = None
+option_dynamics = 'OGGM'
     
 # Bias adjustment option (options: 0, 1, 2, 3) 
 #  0: no adjustment

@@ -1564,6 +1564,8 @@ def main(list_packed_vars):
                             # plot chain
                             fp = (pygem_prms.output_filepath + f'calibration/' + glacier_str.split('.')[0].zfill(2) 
                                     + '/fig/')
+                            if pygem_prms.option_calib_binned_dh:
+                                fp += 'dh/' 
                             os.makedirs(fp, exist_ok=True)
                             if args.num_simultaneous_processes > 1:
                                 show=False
@@ -1602,6 +1604,8 @@ def main(list_packed_vars):
                     modelprms_fn = glacier_str + '-modelprms_dict.pkl'
                     modelprms_fp = [(pygem_prms.output_filepath + f'calibration/' + glacier_str.split('.')[0].zfill(2) 
                                     + '/')]
+                    if pygem_prms.option_calib_binned_dh:
+                        modelprms_fp[0] += 'dh/'
                     # if not using emulator (running full model), save output in ./calibration/ and ./calibration-fullsim/
                     if not pygem_prms.option_use_emulator:
                         modelprms_fp.append(pygem_prms.output_filepath + f'calibration{outpath_sfix}/' + glacier_str.split('.')[0].zfill(2) 
