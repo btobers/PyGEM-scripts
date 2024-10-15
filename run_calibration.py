@@ -183,7 +183,7 @@ def get_binned_dh(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplie
             mb_mwea = mbmod.glac_wide_massbaltotal[gdir.mbdata['t1_idx']:gdir.mbdata['t2_idx']+1].sum() / mbmod.glac_wide_area_annual[0] / nyears
 
         except RuntimeError:
-            return np.nan, np.nan
+            return -np.inf, -np.inf
 
         # Update the latest thickness
         if ev_model is not None:
