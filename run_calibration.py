@@ -1634,6 +1634,7 @@ def main(list_packed_vars):
                     modelprms_export['priors'] = priors
                     if pygem_prms.option_calib_binned_dh:
                         modelprms_export['dh']['x'] = ((gdir.deltah['bin_edges'][:-1] + gdir.deltah['bin_edges'][1:]) / 2).tolist()
+                        modelprms_export['dh']['area'] = gdir.deltah['bin_area']
                         modelprms_export['dh']['obs'] = [ob.flatten().tolist() for ob in obs[1]]
                         modelprms_export['dh']['date'] = gdir.deltah['timestamps']
 
