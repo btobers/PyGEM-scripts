@@ -24,7 +24,7 @@ from pygem.massbalance import PyGEMMassBalance
 #from pygem.glacierdynamics import MassRedistributionCurveModel
 from pygem.oggm_compat import single_flowline_glacier_directory, single_flowline_glacier_directory_with_calving
 import pygem.pygem_modelsetup as modelsetup
-from pygem.shop import debris, mbdata, icethickness, surfelev
+from pygem.shop import debris, mbdata, icethickness, oib
 
 from oggm import cfg
 from oggm import graphics
@@ -656,13 +656,19 @@ def main(list_packed_vars):
         if pygem_prms.option_calibration == 'MCMC' and pygem_prms.option_calib_binned_dh:
             try:
                 # get rgi7id to load oib data
-                rgi7id = surfelev.get_rgi7id(glacier_str, debug=debug)
+                rgi7id = oib._get_rgi7id(glacier_str, debug=debug)
                 if rgi7id:
-                    oib_dict = surfelev.load_oib(rgi7id)
+                    oib_dict = oib._load(rgi7id)
                     # get oib diffs
-                    bin_edges, bin_area, bin_diffs, bin_sigmas, dates = surfelev.get_oib_diffs(oib_dict=oib_dict, aggregate=100)
+                    bin_centers, bin_area, bin_diffs, bin_sigmas, dates = oib._get_diffs(oib_dict=oib_dict, filter_count_pctl=pygem_prms.oib_filter_pctl)
+                    # mask terminus
+                    term_mask = oib._terminus_mask(dates, np.where(np.asarray(bin_area) != 0)[0][0], bin_diffs, debug=False)
+                    bin_diffs[term_mask,:] = np.nan
+                    bin_sigmas[term_mask,:] = np.nan
+                    # rebin so can be compared to PyGEM (bins are originally spaced at 10 m)
+                    bin_edges, bin_area, bin_diffs, bin_sigmas = oib._rebin(bin_centers, bin_area, bin_diffs, bin_sigmas, agg=pygem_prms.oib_rebin)
                     # only retain diffs for survey dates within model timespan
-                    _, oib_inds, pygem_inds = np.intersect1d(dates.to_numpy(), gdir.dates_table.date.to_numpy(), return_indices=True)
+                    _, oib_inds, pygem_inds = np.intersect1d(dates, gdir.dates_table.date.to_numpy(), return_indices=True)
                     bin_diffs = bin_diffs[:,oib_inds]
                     bin_sigmas = bin_sigmas[:,oib_inds]
                     dates = dates[oib_inds]
@@ -695,9 +701,12 @@ def main(list_packed_vars):
                     else:
                         fs = pygem_prms.fs
                         glen_a_multiplier = pygem_prms.glen_a_multiplier
-
+                        
             except Exception as err:
-                fls = None
+                fls = None  # set fls to None as to not proceed with calibration
+                if debug:
+                    print(f'Error loading OIB data')
+
 
         # ----- CALIBRATION OPTIONS ------
         if (fls is not None) and (gdir.mbdata is not None) and (glacier_area.sum() > 0):

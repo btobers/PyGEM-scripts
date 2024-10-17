@@ -205,6 +205,8 @@ hugonnet_area_cn = 'area_km2'
 
 # OIB surface elevation time data
 oib_fp = main_directory + '/../OIB/lidar_cop30_deltas/'
+oib_rebin = 100                     # elevation rebinning in meters
+oib_filter_pctl = 10                # pixel count percentile filter - for each survey
 
 # ----- Frontal Ablation Dataset -----
 calving_fp = main_directory + '/../calving_data/analysis/'
