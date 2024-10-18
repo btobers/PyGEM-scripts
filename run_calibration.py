@@ -1609,7 +1609,7 @@ def main(list_packed_vars):
                                 show=True
                             mcmc.plot_chain(m_primes, m_chain, obs[0], ar, glacier_str, show=show, fpath=f'{fp}/{glacier_str}-chain{n_chain}.png')
                             for i in pred_chain.keys():
-                                mcmc.plot_1t1(obs[i], pred_chain[i], glacier_str, show=show, fpath=f'{fp}/{glacier_str}-chain{n_chain}-1to1-{i}.png')
+                                mcmc.plot_1t1_hist(obs[i], pred_chain[i], glacier_str, show=show, fpath=f'{fp}/{glacier_str}-chain{n_chain}-1to1-{i}.png')
 
                         # Store data from model to be exported
                         chain_str = 'chain_' + str(n_chain)

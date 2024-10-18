@@ -14,11 +14,9 @@ user_info = {'name':'Brandon Tober',
             'institution':'Carnegie Mellon University, Pittsburgh PA',
             'email':'btober@cmu.edu'}
 main_directory = os.getcwd()
-main_directory = '/trace/group/rounce/shared/Output/'      # file path hack if data is in different location from code
-# main_directory = '/Users/btober/Documents/pygem_data/Output/'      # file path hack if data is in different location from code
+# main_directory = '/trace/group/rounce/shared/Output/'      # file path hack if data is in different location from code
 # Output directory
 output_filepath = main_directory + '/../Output/'
-output_filepath = '/trace/group/rounce/btober/Output/'
 
 #%% ===== GLACIER SELECTION =====
 rgi_regionsO1 = [1]                 # 1st order region number (RGI V6.0)
@@ -35,7 +33,6 @@ glac_no = None
 # glac_no = ['15.03733'] # Khumbu Glacier
 # glac_no = ['1.10689'] # Columbia Glacier
 # glac_no = ['1.03622'] # LeConte Glacier
-# glac_no = ['1.15648'] # kennicott
 
 if glac_no is not None:
     rgi_regionsO1 = sorted(list(set([int(x.split('.')[0]) for x in glac_no])))
@@ -142,7 +139,7 @@ elif option_calibration == 'emulator':
     
 elif option_calibration == 'MCMC':
     option_use_emulator = True      # use emulator or full model (if true, calibration must have first been run with option_calibretion=='emulator')
-    option_calib_binned_dh = True  # calibrate against binned \delta h observations along with geodetic mass balance
+    option_calib_binned_dh = False  # calibrate against binned \delta h observations along with geodetic mass balance
     emulator_fp = output_filepath + 'emulator/'
     emulator_sims = 100
     tbias_step = 0.1
