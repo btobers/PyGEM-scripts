@@ -16,6 +16,7 @@ import os
 import sys
 import time
 import cftime
+import json
 # External libraries
 import pandas as pd
 import pickle
@@ -421,14 +422,14 @@ def main(list_packed_vars):
                 # Load model parameters
                 if pygem_prms.option_calibration:
                     
-                    modelprms_fn = glacier_str + '-modelprms_dict.pkl'
+                    modelprms_fn = glacier_str + '-modelprms_dict.json'
                     modelprms_fp = (pygem_prms.output_filepath + 'calibration/' + glacier_str.split('.')[0].zfill(2) 
                                     + '/')
                     modelprms_fullfn = modelprms_fp + modelprms_fn
     
                     assert os.path.exists(modelprms_fullfn), 'Calibrated parameters do not exist.'
-                    with open(modelprms_fullfn, 'rb') as f:
-                        modelprms_dict = pickle.load(f)
+                    with open(modelprms_fullfn, 'r') as f:
+                        modelprms_dict = json.load(f)
     
                     assert pygem_prms.option_calibration in modelprms_dict, ('Error: ' + pygem_prms.option_calibration +
                                                                               ' not in modelprms_dict')
@@ -1377,8 +1378,8 @@ if __name__ == '__main__':
     if args.rgi_glac_number:
         glac_no = [args.rgi_glac_number]
     elif args.rgi_glac_number_fn is not None:
-        with open(args.rgi_glac_number_fn, 'rb') as f:
-            glac_no = pickle.load(f)
+        with open(args.rgi_glac_number_fn, 'r') as f:
+            glac_no = json.load(f)
     elif args.rgi_region01:
         main_glac_rgi_all = modelsetup.selectglaciersrgitable(
                 rgi_regionsO1=[args.rgi_region01], rgi_regionsO2=pygem_prms.rgi_regionsO2,
